@@ -13,7 +13,7 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 | [BOOTSTRAP-OUTLINE-NOTES.md](BOOTSTRAP-OUTLINE-NOTES.md) | Self-hosted Outline wiki setup + workspace sync cron |
 | [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions → Telegram + OpenClaw alerts |
 | [BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md](BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md) | Add Claude Code PR + commit review to GitHub repos |
-| [BOOTSTRAP-TELEGRAM-FORMATTING.md](BOOTSTRAP-TELEGRAM-FORMATTING.md) | Telegram formatting rules — no tables, no headers (add to SOUL.md) |
+| [BOOTSTRAP-TELEGRAM.md](BOOTSTRAP-TELEGRAM.md) | Set up Telegram bot + communication rules (formatting, buttons, reactions) |
 | [OPTIMIZE-TOO-LARGE-CONTEXT.md](OPTIMIZE-TOO-LARGE-CONTEXT.md) | Reduce context window bloat — slim SOUL.md, extract skills |
 
 ## Recommended Run Order (New Instance)
@@ -24,7 +24,7 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 4. **MEMORY-SEARCH** — enables semantic recall
 5. **OUTLINE-NOTES** — set up team wiki (when needed)
 6. **PIPELINE-NOTIFICATIONS** — wire up build alerts
-7. **TELEGRAM-FORMATTING** — add rules to SOUL.md
+7. **TELEGRAM** — create bot, wire up OpenClaw, add formatting rules to SOUL.md
 8. **GITHUBACTION-CODE-REVIEW** — add to each repo as needed
 
 > **Built-in (no bootstrap needed):** Heartbeat monitoring (`HEARTBEAT.md`), daily memory logging (`memory/YYYY-MM-DD.md`), long-term recall (`MEMORY.md`) — these are part of the OpenClaw runtime.
