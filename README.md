@@ -31,5 +31,5 @@ Create a new `BOOTSTRAP-*.md` file following the same pattern:
 
 ## Related
 
-- [faststart-brain](https://github.com/loki-bedlam/faststart-brain) — Workspace template files (SOUL.md, AGENTS.md, etc.)
+- [faststart-brain](https://github.com/inceptionstack/loki-template-brain) — Workspace template files (SOUL.md, AGENTS.md, etc.)
 - [loki-skills](https://github.com/inceptionstack/loki-skills) — Skills library
