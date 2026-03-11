@@ -8,8 +8,24 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 |--------|---------|
 | [BOOTSTRAP-SECURITY.md](BOOTSTRAP-SECURITY.md) | Enable security monitoring, budgets, and operational hygiene |
 | [BOOTSTRAP-SKILLS.md](BOOTSTRAP-SKILLS.md) | Install the FastStart skills library |
-| [BOOTSTRAP-MEMORY-SEARCH.md](BOOTSTRAP-MEMORY-SEARCH.md) | Enable semantic memory search with Bedrock Titan Embed v2 proxy |
-| [OPTIMIZE-TOO-LARGE-CONTEXT.md](OPTIMIZE-TOO-LARGE-CONTEXT.md) | Reduce context window bloat — slim SOUL.md, extract skills, remove duplication |
+| [BOOTSTRAP-MEMORY-SEARCH.md](BOOTSTRAP-MEMORY-SEARCH.md) | Enable semantic memory search with embedrock + Cohere Embed v4 |
+| [BOOTSTRAP-MEMORY-LOGGING.md](BOOTSTRAP-MEMORY-LOGGING.md) | Daily memory logging pattern and long-term recall with MEMORY.md |
+| [BOOTSTRAP-HEARTBEAT.md](BOOTSTRAP-HEARTBEAT.md) | Autonomous monitoring loop — task board, pipelines, security |
+| [BOOTSTRAP-OUTLINE-SYNC.md](BOOTSTRAP-OUTLINE-SYNC.md) | Sync workspace docs to Outline wiki via daily crons |
+| [BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md](BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md) | Add Claude Code PR + commit review to GitHub repos |
+| [BOOTSTRAP-TELEGRAM-FORMATTING.md](BOOTSTRAP-TELEGRAM-FORMATTING.md) | Telegram formatting rules (no tables, no headers) |
+| [OPTIMIZE-TOO-LARGE-CONTEXT.md](OPTIMIZE-TOO-LARGE-CONTEXT.md) | Reduce context window bloat — slim SOUL.md, extract skills |
+
+## Recommended Run Order (New Instance)
+
+1. **SECURITY** — always first
+2. **SKILLS** — unlocks capabilities
+3. **MEMORY-SEARCH** — enables semantic recall
+4. **MEMORY-LOGGING** — establishes logging discipline
+5. **HEARTBEAT** — starts autonomous monitoring
+6. **OUTLINE-SYNC** — connects to team wiki
+7. **TELEGRAM-FORMATTING** — add rules to SOUL.md
+8. **GITHUBACTION-CODE-REVIEW** — add to each repo as needed
 
 ## Usage
 
@@ -33,5 +49,6 @@ Create a new `BOOTSTRAP-*.md` file following the same pattern:
 
 ## Related
 
-- [faststart-brain](https://github.com/inceptionstack/loki-template-brain) — Workspace template files (SOUL.md, AGENTS.md, etc.)
+- [loki-template-brain](https://github.com/inceptionstack/loki-template-brain) — Workspace template files (SOUL.md, AGENTS.md, etc.)
 - [loki-skills](https://github.com/inceptionstack/loki-skills) — Skills library
+- [embedrock](https://github.com/inceptionstack/embedrock) — Bedrock embedding proxy
