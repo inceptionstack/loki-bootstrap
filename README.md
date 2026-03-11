@@ -8,25 +8,26 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 |--------|---------|
 | [BOOTSTRAP-SECURITY.md](BOOTSTRAP-SECURITY.md) | Enable security monitoring, budgets, and operational hygiene |
 | [BOOTSTRAP-SKILLS.md](BOOTSTRAP-SKILLS.md) | Install the FastStart skills library |
+| [BOOTSTRAP-SECRETS-MANAGEMENT.md](BOOTSTRAP-SECRETS-MANAGEMENT.md) | git-secrets on all repos + Secrets Manager patterns (standing rules) |
 | [BOOTSTRAP-MEMORY-SEARCH.md](BOOTSTRAP-MEMORY-SEARCH.md) | Enable semantic memory search with embedrock + Cohere Embed v4 |
-| [BOOTSTRAP-MEMORY-LOGGING.md](BOOTSTRAP-MEMORY-LOGGING.md) | Daily memory logging pattern and long-term recall with MEMORY.md |
-| [BOOTSTRAP-HEARTBEAT.md](BOOTSTRAP-HEARTBEAT.md) | Autonomous monitoring loop — task board, pipelines, security |
-| [BOOTSTRAP-OUTLINE-SYNC.md](BOOTSTRAP-OUTLINE-SYNC.md) | Sync workspace docs to Outline wiki via daily crons |
+| [BOOTSTRAP-OUTLINE-NOTES.md](BOOTSTRAP-OUTLINE-NOTES.md) | Self-hosted Outline wiki setup + workspace sync cron |
+| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions → Telegram + OpenClaw alerts |
 | [BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md](BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md) | Add Claude Code PR + commit review to GitHub repos |
-| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | Wire CodePipeline + GitHub Actions → Telegram + OpenClaw alerts |
-| [BOOTSTRAP-TELEGRAM-FORMATTING.md](BOOTSTRAP-TELEGRAM-FORMATTING.md) | Telegram formatting rules (no tables, no headers) |
+| [BOOTSTRAP-TELEGRAM-FORMATTING.md](BOOTSTRAP-TELEGRAM-FORMATTING.md) | Telegram formatting rules — no tables, no headers (add to SOUL.md) |
 | [OPTIMIZE-TOO-LARGE-CONTEXT.md](OPTIMIZE-TOO-LARGE-CONTEXT.md) | Reduce context window bloat — slim SOUL.md, extract skills |
 
 ## Recommended Run Order (New Instance)
 
 1. **SECURITY** — always first
-2. **SKILLS** — unlocks capabilities
-3. **MEMORY-SEARCH** — enables semantic recall
-4. **MEMORY-LOGGING** — establishes logging discipline
-5. **HEARTBEAT** — starts autonomous monitoring
-6. **OUTLINE-SYNC** — connects to team wiki
+2. **SECRETS-MANAGEMENT** — install git-secrets, establish rules
+3. **SKILLS** — unlocks capabilities
+4. **MEMORY-SEARCH** — enables semantic recall
+5. **OUTLINE-NOTES** — set up team wiki (when needed)
+6. **PIPELINE-NOTIFICATIONS** — wire up build alerts
 7. **TELEGRAM-FORMATTING** — add rules to SOUL.md
 8. **GITHUBACTION-CODE-REVIEW** — add to each repo as needed
+
+> **Built-in (no bootstrap needed):** Heartbeat monitoring (`HEARTBEAT.md`), daily memory logging (`memory/YYYY-MM-DD.md`), long-term recall (`MEMORY.md`) — these are part of the OpenClaw runtime.
 
 ## Usage
 
@@ -46,7 +47,7 @@ Create a new `BOOTSTRAP-*.md` file following the same pattern:
 - Clear numbered steps
 - Marker file check at the top (`memory/.bootstrapped-*`)
 - Marker file creation at the end
-- Summary report to the operator
+- No real secrets — use `YOUR_VALUE` placeholders throughout
 
 ## Related
 
