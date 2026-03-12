@@ -338,6 +338,8 @@ echo "Webhook URL: https://${API_ID}.execute-api.us-east-1.amazonaws.com/webhook
 
 ### Step 3: Register Webhook on Each GitHub Repo
 
+> **Important:** Repos may already have webhooks registered by other systems (e.g. other notification pipelines, CI integrations). **Do not delete existing webhooks.** Always add your webhook alongside any that already exist. Check first, then add only if your URL isn't already registered.
+
 ```bash
 export GH_TOKEN=$(aws secretsmanager get-secret-value \
   --secret-id /faststart/github-token --query SecretString --output text --region us-east-1)
@@ -345,14 +347,20 @@ export GH_TOKEN=$(aws secretsmanager get-secret-value \
 WEBHOOK_URL="https://API_ID.execute-api.us-east-1.amazonaws.com/webhook"
 
 for repo in admin-mission-control-ui solo-mission-control-ui standalone-remote-access-ui; do
-  gh api repos/inceptionstack/$repo/hooks \
-    --method POST \
-    --field name=web \
-    --field active=true \
-    --field "events[]=workflow_run" \
-    --field "config[url]=$WEBHOOK_URL" \
-    --field "config[content_type]=json"
-  echo "Webhook registered: $repo"
+  # Check if this webhook URL is already registered — don't duplicate
+  existing=$(curl -s -H "Authorization: token $GH_TOKEN" \
+    "https://api.github.com/repos/inceptionstack/$repo/hooks" | \
+    python3 -c "import sys,json; hooks=json.load(sys.stdin); print('yes' if any('$WEBHOOK_URL' in h.get('config',{}).get('url','') for h in hooks) else 'no')")
+
+  if [ "$existing" = "yes" ]; then
+    echo "$repo: webhook already registered, skipping"
+    continue
+  fi
+
+  curl -s -X POST -H "Authorization: token $GH_TOKEN" \
+    "https://api.github.com/repos/inceptionstack/$repo/hooks" \
+    -d "{\"name\":\"web\",\"active\":true,\"events\":[\"workflow_run\"],\"config\":{\"url\":\"$WEBHOOK_URL\",\"content_type\":\"json\"}}"
+  echo "Webhook added: $repo"
 done
 ```
 
