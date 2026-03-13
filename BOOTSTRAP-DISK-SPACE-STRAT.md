@@ -164,14 +164,21 @@ The threshold defaults to 90% but can be overridden via `DISK_WATCHDOG_THRESHOLD
 Add via OpenClaw to auto-clean on a schedule:
 
 ```
-/cron add "Nightly disk cleanup" --schedule "0 3 * * *" --session isolated --message "Run nightly disk cleanup:
-1. Delete node_modules/ under workspace
-2. Delete build artifacts (.next/, dist/, build/, coverage/) under workspace
-3. Clean npm/pip/uv cache
-4. Delete /tmp files older than 2 days
-5. Prune Docker (stopped containers, unused images, dangling volumes, build cache): docker system prune -af --volumes
-6. Vacuum journal logs older than 7 days: sudo journalctl --vacuum-time=7d
-7. Report: df -h / and highlight any volume over 80% usage
+/cron add "Nightly disk cleanup" --schedule "0 3 * * *" --session isolated --message "Run nightly disk cleanup. Log ALL output to memory/disk-cleanup-latest.log (overwrite each run).
+
+At the top of the log, write the timestamp.
+
+Steps:
+1. Log df -h / (before)
+2. Delete node_modules/ under workspace
+3. Delete build artifacts (.next/, dist/, build/, coverage/) under workspace
+4. Clean npm/pip/uv cache
+5. Delete /tmp files older than 2 days
+6. Prune Docker (stopped containers, unused images, dangling volumes, build cache): docker system prune -af --volumes
+7. Vacuum journal logs older than 7 days: sudo journalctl --vacuum-time=7d
+8. Log df -h / (after)
+9. Log summary: space freed, any warnings
+
 Alert the operator on Telegram ONLY if root disk exceeds 75% after cleanup, or if any unexpected directory has grown by more than 2GB."
 ```
 
