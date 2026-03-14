@@ -14,7 +14,7 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 | [BOOTSTRAP-CODING-GUIDELINES.md](essential/BOOTSTRAP-CODING-GUIDELINES.md) | Coding standards — testing, linting, commit conventions, CI/CD rules |
 | [BOOTSTRAP-DISK-SPACE-STRAT.md](essential/BOOTSTRAP-DISK-SPACE-STRAT.md) | EC2 disk space strategy — secondary EBS data volume, nightly cleanup cron, Docker/tmp offloading |
 | [BOOTSTRAP-DAILY-UPDATE.md](essential/BOOTSTRAP-DAILY-UPDATE.md) | Daily morning briefing cron — costs, security findings, pipeline health |
-| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](essential/BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions → Telegram + OpenClaw webhook alerts |
+| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](optional/BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions → Telegram + OpenClaw webhook alerts |
 
 ## Optional Bootstraps (`optional/`)
 
