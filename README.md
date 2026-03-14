@@ -6,7 +6,6 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 
 | File | Purpose |
 |------|---------|
-| [BOOTSTRAP-MODEL-CONFIG.md](optional/BOOTSTRAP-MODEL-CONFIG.md) | **Run first** — configure AI models (Sonnet default, Opus fallback) to save tokens on all other bootstraps |
 | [BOOTSTRAP-SECURITY.md](essential/BOOTSTRAP-SECURITY.md) | Enable Security Hub, Inspector, budgets, WAF, and operational hygiene |
 | [BOOTSTRAP-SECRETS-AWS.md](essential/BOOTSTRAP-SECRETS-AWS.md) | AWS Secrets Manager integration — exec provider, gotchas, troubleshooting |
 | [BOOTSTRAP-SKILLS.md](essential/BOOTSTRAP-SKILLS.md) | Install the FastStart skills library |
@@ -14,38 +13,34 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 | [BOOTSTRAP-CODING-GUIDELINES.md](essential/BOOTSTRAP-CODING-GUIDELINES.md) | Coding standards — testing, linting, commit conventions, CI/CD rules |
 | [BOOTSTRAP-DISK-SPACE-STRAT.md](essential/BOOTSTRAP-DISK-SPACE-STRAT.md) | EC2 disk space strategy — secondary EBS data volume, nightly cleanup cron, Docker/tmp offloading |
 | [BOOTSTRAP-DAILY-UPDATE.md](essential/BOOTSTRAP-DAILY-UPDATE.md) | Daily morning briefing cron — costs, security findings, pipeline health |
-| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](optional/BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions → Telegram + OpenClaw webhook alerts |
 
 ## Optional Bootstraps (`optional/`)
 
 | File | Purpose |
 |------|---------|
+| [BOOTSTRAP-MODEL-CONFIG.md](optional/BOOTSTRAP-MODEL-CONFIG.md) | Configure AI models (Sonnet default, Opus fallback) to save tokens |
 | [BOOTSTRAP-TELEGRAM.md](optional/BOOTSTRAP-TELEGRAM.md) | Create Telegram bot, wire up OpenClaw, add formatting/reaction rules to SOUL.md |
 | [BOOTSTRAP-OUTLINE-NOTES.md](optional/BOOTSTRAP-OUTLINE-NOTES.md) | Self-hosted Outline wiki (ECS + Aurora + S3 + Cognito OIDC) + workspace sync cron |
+| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](optional/BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions → Telegram + OpenClaw webhook alerts |
 | [BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md](optional/BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md) | Add automatic Claude Code PR + commit review to GitHub repos via Actions |
 | [BOOTSTRAP-WEB-UI.md](optional/BOOTSTRAP-WEB-UI.md) | Expose OpenClaw Control UI via CloudFront + Cognito — ALB, proxy, WebSocket, device pairing |
-
-## Optimization Guides
-
-| File | Purpose |
-|------|---------|
 | [OPTIMIZE-TOO-LARGE-CONTEXT.md](optional/OPTIMIZE-TOO-LARGE-CONTEXT.md) | Reduce context window usage — trim workspace files, manage memory, compaction strategies |
 
 ## Recommended Run Order (New Instance)
 
 **Essential (run in order):**
-1. **MODEL-CONFIG** — always first, saves tokens on everything that follows
-2. **SECURITY** — always second
-3. **SECRETS-AWS** — git-secrets, Secrets Manager rules
-4. **SKILLS** — unlocks capabilities
-5. **MEMORY-SEARCH** — enables semantic recall
-6. **CODING-GUIDELINES** — establish coding standards
-7. **DISK-SPACE-STRAT** — set up data volume + nightly cleanup
-8. **PIPELINE-NOTIFICATIONS** — wire up build alerts
-9. **DAILY-UPDATE** — morning briefing cron
+1. **SECURITY** — always first
+2. **SECRETS-AWS** — git-secrets, Secrets Manager rules
+3. **SKILLS** — unlocks capabilities
+4. **MEMORY-SEARCH** — enables semantic recall
+5. **CODING-GUIDELINES** — establish coding standards
+6. **DISK-SPACE-STRAT** — set up data volume + nightly cleanup
+7. **DAILY-UPDATE** — morning briefing cron
 
 **Optional (add as needed):**
+- **MODEL-CONFIG** — switch default model to save tokens
 - **TELEGRAM** — create bot, wire up OpenClaw, formatting rules
+- **PIPELINE-NOTIFICATIONS** — wire up build alerts
 - **OUTLINE-NOTES** — team wiki
 - **GITHUBACTION-CODE-REVIEW** — add to each repo
 - **WEB-UI** — expose Control UI via CloudFront
