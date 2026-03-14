@@ -6,7 +6,7 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 
 | File | Purpose |
 |------|---------|
-| [BOOTSTRAP-MODEL-CONFIG.md](essential/BOOTSTRAP-MODEL-CONFIG.md) | **Run first** — configure AI models (Sonnet default, Opus fallback) to save tokens on all other bootstraps |
+| [BOOTSTRAP-MODEL-CONFIG.md](optional/BOOTSTRAP-MODEL-CONFIG.md) | **Run first** — configure AI models (Sonnet default, Opus fallback) to save tokens on all other bootstraps |
 | [BOOTSTRAP-SECURITY.md](essential/BOOTSTRAP-SECURITY.md) | Enable Security Hub, Inspector, budgets, WAF, and operational hygiene |
 | [BOOTSTRAP-SECRETS-AWS.md](essential/BOOTSTRAP-SECRETS-AWS.md) | AWS Secrets Manager integration — exec provider, gotchas, troubleshooting |
 | [BOOTSTRAP-SKILLS.md](essential/BOOTSTRAP-SKILLS.md) | Install the FastStart skills library |
