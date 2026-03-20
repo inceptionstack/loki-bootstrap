@@ -24,7 +24,7 @@ Choose one of three deployment methods. All deploy the same architecture.
 
 ### Option 1: CloudFormation (Console)
 
-1. Download `deploy/template.yaml`
+1. Download `deploy/cloudformation/template.yaml`
 2. Open the [CloudFormation Console](https://console.aws.amazon.com/cloudformation/home#/stacks/create)
 3. Upload the template, fill in parameters, and create the stack
 4. Wait for `CREATE_COMPLETE` (~8–10 minutes)
@@ -32,10 +32,10 @@ Choose one of three deployment methods. All deploy the same architecture.
 ### Option 2: SAM CLI
 
 ```bash
-sam build -t deploy/sam-template.yaml
+sam build -t deploy/sam/template.yaml
 sam deploy \
   --guided \
-  --template-file deploy/sam-template.yaml \
+  --template-file deploy/sam/template.yaml \
   --stack-name openclaw-stack \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
 ```
