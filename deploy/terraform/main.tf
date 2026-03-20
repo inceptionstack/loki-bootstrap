@@ -1,0 +1,709 @@
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+data "aws_ssm_parameter" "al2023_ami" {
+  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64"
+}
+
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+# ============================================================================
+# VPC & Networking
+# ============================================================================
+resource "aws_vpc" "main" {
+  cidr_block           = var.vpc_cidr
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+
+  tags = {
+    Name = "${var.environment_name}-vpc"
+  }
+}
+
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "${var.environment_name}-igw"
+  }
+}
+
+resource "aws_subnet" "public" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = var.public_subnet_cidr
+  map_public_ip_on_launch = true
+  availability_zone       = data.aws_availability_zones.available.names[0]
+
+  tags = {
+    Name = "${var.environment_name}-public"
+  }
+}
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+
+  tags = {
+    Name = "${var.environment_name}-public-routes"
+  }
+}
+
+resource "aws_route_table_association" "public" {
+  subnet_id      = aws_subnet.public.id
+  route_table_id = aws_route_table.public.id
+}
+
+# ============================================================================
+# Security Group
+# ============================================================================
+resource "aws_security_group" "main" {
+  name        = "${var.environment_name}-sg"
+  description = "Security group for ${var.environment_name} EC2 instance"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.ssh_allowed_cidr]
+    description = "SSH access"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "All outbound traffic"
+  }
+
+  tags = {
+    Name = "${var.environment_name}-sg"
+  }
+}
+
+# ============================================================================
+# IAM Role & Instance Profile
+# ============================================================================
+resource "aws_iam_role" "instance" {
+  name = "${var.environment_name}-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  tags = {
+    Name = "${var.environment_name}-role"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "instance_ssm" {
+  role       = aws_iam_role.instance.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_role_policy_attachment" "instance_admin" {
+  role       = aws_iam_role.instance.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+
+resource "aws_iam_instance_profile" "main" {
+  name = "${var.environment_name}-profile"
+  role = aws_iam_role.instance.name
+}
+
+# ============================================================================
+# Bedrock Model Access (Lambda + invocation)
+# ============================================================================
+resource "aws_iam_role" "bedrock_form_lambda" {
+  name = "${var.environment_name}-bedrock-form-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "bedrock_form_lambda_basic" {
+  role       = aws_iam_role.bedrock_form_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "bedrock_form" {
+  name = "bedrock-form"
+  role = aws_iam_role.bedrock_form_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:PutUseCaseForModelAccess",
+          "bedrock:GetUseCaseForModelAccess"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "servicequotas:RequestServiceQuotaIncrease",
+          "servicequotas:GetServiceQuota",
+          "servicequotas:ListRequestedServiceQuotaChangeHistory"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+data "archive_file" "bedrock_form" {
+  type        = "zip"
+  output_path = "${path.module}/.lambda_zips/bedrock_form.zip"
+
+  source {
+    content  = <<-PYTHON
+import json, time, boto3, traceback
+
+def request_quota_increases():
+    sq = boto3.client('servicequotas', region_name='us-east-1')
+    quotas = [
+        ('L-11DFF789', 1000, 'Cross-region RPM Opus 4.6'),
+        ('L-0AD9BBE8', 4000000, 'Cross-region TPM Opus 4.6'),
+    ]
+    for code, desired, name in quotas:
+        try:
+            current = sq.get_service_quota(ServiceCode='bedrock', QuotaCode=code)
+            current_val = current['Quota']['Value']
+            if current_val >= desired:
+                print(f"[OK] {name}: already at {current_val}")
+                continue
+            sq.request_service_quota_increase(
+                ServiceCode='bedrock', QuotaCode=code, DesiredValue=desired
+            )
+            print(f"[OK] {name}: requested {current_val} -> {desired}")
+        except Exception as e:
+            print(f"[WARN] {name} quota request failed: {e}")
+
+def handler(event, context):
+    print(f"[INFO] Event: {json.dumps(event)}")
+    request_quotas = event.get('request_quotas', 'false')
+
+    client = boto3.client('bedrock', region_name='us-east-1')
+    form_payload = json.dumps({
+        "companyName": "My Company",
+        "companyWebsite": "https://example.com",
+        "intendedUsers": "0",
+        "industryOption": "Education",
+        "otherIndustryOption": "",
+        "useCases": "AI development"
+    }).encode()
+
+    try:
+        try:
+            existing = client.get_use_case_for_model_access()
+            print(f"[OK] Form already submitted: {existing.get('formData', '')[:50]}...")
+            if request_quotas == 'true':
+                request_quota_increases()
+            return {'status': 'ALREADY_SUBMITTED'}
+        except client.exceptions.ResourceNotFoundException:
+            print("[INFO] Form not yet submitted, submitting now...")
+
+        print(f"[INFO] Submitting form ({len(form_payload)} bytes)")
+        client.put_use_case_for_model_access(formData=form_payload)
+        print("[OK] Form submitted successfully")
+
+        time.sleep(2)
+        try:
+            verify = client.get_use_case_for_model_access()
+            print(f"[OK] Form verified: {verify.get('formData', '')[:50]}...")
+        except client.exceptions.ResourceNotFoundException:
+            print("[WARN] Form not found after submission")
+
+        if request_quotas == 'true':
+            request_quota_increases()
+
+        return {'status': 'SUBMITTED'}
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"[FAIL] {e}\n{tb}")
+        return {'status': 'FAILED', 'error': str(e)}
+    PYTHON
+    filename = "index.py"
+  }
+}
+
+resource "aws_lambda_function" "bedrock_form" {
+  function_name    = "${var.environment_name}-bedrock-form"
+  role             = aws_iam_role.bedrock_form_lambda.arn
+  handler          = "index.handler"
+  runtime          = "python3.12"
+  timeout          = 120
+  filename         = data.archive_file.bedrock_form.output_path
+  source_code_hash = data.archive_file.bedrock_form.output_base64sha256
+
+  depends_on = [aws_iam_role_policy.bedrock_form]
+}
+
+resource "null_resource" "bedrock_form_invoke" {
+  depends_on = [aws_lambda_function.bedrock_form]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws lambda invoke \
+        --function-name "${var.environment_name}-bedrock-form" \
+        --payload '${jsonencode({ request_quotas = var.request_quota_increases })}' \
+        --cli-binary-format raw-in-base64-out \
+        --region us-east-1 \
+        /tmp/bedrock_form_response.json && cat /tmp/bedrock_form_response.json
+    EOT
+  }
+}
+
+# ============================================================================
+# Security Services Enablement (Lambda + invocation)
+# ============================================================================
+resource "aws_iam_role" "security_enablement_lambda" {
+  name = "${var.environment_name}-security-enable-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "security_enablement_basic" {
+  role       = aws_iam_role.security_enablement_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "security_services" {
+  name = "security-services"
+  role = aws_iam_role.security_enablement_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "securityhub:EnableSecurityHub",
+        "securityhub:DescribeHub",
+        "securityhub:BatchEnableStandards",
+        "guardduty:CreateDetector",
+        "guardduty:ListDetectors",
+        "inspector2:Enable",
+        "inspector2:BatchGetAccountStatus",
+        "access-analyzer:CreateAnalyzer",
+        "access-analyzer:ListAnalyzers",
+        "config:PutConfigurationRecorder",
+        "config:PutDeliveryChannel",
+        "config:StartConfigurationRecorder",
+        "config:DescribeConfigurationRecorders",
+        "config:DescribeDeliveryChannels",
+        "s3:CreateBucket",
+        "s3:PutBucketPolicy",
+        "s3:GetBucketPolicy",
+        "iam:CreateServiceLinkedRole",
+        "iam:GetRole"
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
+data "archive_file" "security_enablement" {
+  type        = "zip"
+  output_path = "${path.module}/.lambda_zips/security_enablement.zip"
+
+  source {
+    content  = <<-PYTHON
+import json, boto3
+
+def handler(event, context):
+    print(f"[INFO] Event: {json.dumps(event)}")
+    region = 'us-east-1'
+    account_id = boto3.client('sts').get_caller_identity()['Account']
+    results = []
+
+    # 1. Security Hub
+    try:
+        sh = boto3.client('securityhub', region_name=region)
+        try:
+            sh.describe_hub()
+            print("[OK] Security Hub already enabled")
+        except:
+            sh.enable_security_hub(EnableDefaultStandards=True)
+            print("[OK] Security Hub enabled")
+        results.append('SecurityHub:OK')
+    except Exception as e:
+        print(f"[WARN] Security Hub: {e}")
+        results.append('SecurityHub:WARN')
+
+    # 2. GuardDuty
+    try:
+        gd = boto3.client('guardduty', region_name=region)
+        detectors = gd.list_detectors()['DetectorIds']
+        if detectors:
+            print(f"[OK] GuardDuty already enabled: {detectors[0]}")
+        else:
+            resp = gd.create_detector(Enable=True, FindingPublishingFrequency='FIFTEEN_MINUTES')
+            print(f"[OK] GuardDuty enabled: {resp['DetectorId']}")
+        results.append('GuardDuty:OK')
+    except Exception as e:
+        print(f"[WARN] GuardDuty: {e}")
+        results.append('GuardDuty:WARN')
+
+    # 3. Inspector
+    try:
+        insp = boto3.client('inspector2', region_name=region)
+        insp.enable(resourceTypes=['EC2', 'ECR', 'LAMBDA', 'LAMBDA_CODE'], accountIds=[account_id])
+        print("[OK] Inspector enabled (EC2, ECR, Lambda)")
+        results.append('Inspector:OK')
+    except Exception as e:
+        print(f"[WARN] Inspector: {e}")
+        results.append('Inspector:WARN')
+
+    # 4. IAM Access Analyzer
+    try:
+        aa = boto3.client('accessanalyzer', region_name=region)
+        analyzers = aa.list_analyzers(type='ACCOUNT')['analyzers']
+        if analyzers:
+            print(f"[OK] Access Analyzer already exists: {analyzers[0]['name']}")
+        else:
+            aa.create_analyzer(analyzerName='account-analyzer', type='ACCOUNT')
+            print("[OK] Access Analyzer created")
+        results.append('AccessAnalyzer:OK')
+    except Exception as e:
+        print(f"[WARN] Access Analyzer: {e}")
+        results.append('AccessAnalyzer:WARN')
+
+    # 5. Config Recorder
+    try:
+        cfg = boto3.client('config', region_name=region)
+        recorders = cfg.describe_configuration_recorders()['ConfigurationRecorders']
+        if recorders:
+            print(f"[OK] Config recorder already exists: {recorders[0]['name']}")
+        else:
+            s3 = boto3.client('s3', region_name=region)
+            bucket_name = f'config-bucket-{account_id}-{region}'
+            try:
+                s3.create_bucket(Bucket=bucket_name)
+                s3.put_bucket_policy(Bucket=bucket_name, Policy=json.dumps({
+                    'Version': '2012-10-17',
+                    'Statement': [{
+                        'Sid': 'AWSConfigBucketPermissionsCheck',
+                        'Effect': 'Allow',
+                        'Principal': {'Service': 'config.amazonaws.com'},
+                        'Action': 's3:GetBucketAcl',
+                        'Resource': f'arn:aws:s3:::{bucket_name}'
+                    }, {
+                        'Sid': 'AWSConfigBucketDelivery',
+                        'Effect': 'Allow',
+                        'Principal': {'Service': 'config.amazonaws.com'},
+                        'Action': 's3:PutObject',
+                        'Resource': f'arn:aws:s3:::{bucket_name}/*',
+                        'Condition': {'StringEquals': {'s3:x-amz-acl': 'bucket-owner-full-control'}}
+                    }]
+                }))
+            except s3.exceptions.BucketAlreadyOwnedByYou:
+                pass
+            except Exception as be:
+                print(f"[WARN] Config bucket: {be}")
+
+            try:
+                cfg.put_configuration_recorder(ConfigurationRecorder={
+                    'name': 'default',
+                    'roleARN': f'arn:aws:iam::{account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig',
+                    'recordingGroup': {'allSupported': True, 'includeGlobalResourceTypes': True}
+                })
+                cfg.put_delivery_channel(DeliveryChannel={
+                    'name': 'default',
+                    's3BucketName': bucket_name,
+                })
+                cfg.start_configuration_recorder(ConfigurationRecorderName='default')
+                print("[OK] Config recorder started")
+            except Exception as ce:
+                print(f"[WARN] Config recorder: {ce}")
+        results.append('Config:OK')
+    except Exception as e:
+        print(f"[WARN] Config: {e}")
+        results.append('Config:WARN')
+
+    return {'results': ', '.join(results)}
+    PYTHON
+    filename = "index.py"
+  }
+}
+
+resource "aws_lambda_function" "security_enablement" {
+  function_name    = "${var.environment_name}-security-enable"
+  role             = aws_iam_role.security_enablement_lambda.arn
+  handler          = "index.handler"
+  runtime          = "python3.12"
+  timeout          = 120
+  filename         = data.archive_file.security_enablement.output_path
+  source_code_hash = data.archive_file.security_enablement.output_base64sha256
+
+  depends_on = [aws_iam_role_policy.security_services]
+}
+
+resource "null_resource" "security_enablement_invoke" {
+  depends_on = [aws_lambda_function.security_enablement]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws lambda invoke \
+        --function-name "${var.environment_name}-security-enable" \
+        --payload '{}' \
+        --cli-binary-format raw-in-base64-out \
+        --region us-east-1 \
+        /tmp/security_enable_response.json && cat /tmp/security_enable_response.json
+    EOT
+  }
+}
+
+# ============================================================================
+# Admin Console User
+# ============================================================================
+resource "aws_iam_user" "admin" {
+  name = "inceptionstack-admin"
+
+  tags = {
+    Name      = "${var.environment_name}-admin"
+    ManagedBy = "Terraform"
+  }
+}
+
+resource "aws_iam_user_policy_attachment" "admin" {
+  user       = aws_iam_user.admin.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+
+resource "aws_iam_access_key" "admin" {
+  user = aws_iam_user.admin.name
+}
+
+# Admin password Lambda
+resource "aws_iam_role" "admin_password_lambda" {
+  name = "${var.environment_name}-admin-pw-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "admin_password_basic" {
+  role       = aws_iam_role.admin_password_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "admin_password" {
+  name = "admin-password"
+  role = aws_iam_role.admin_password_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["iam:CreateLoginProfile", "iam:UpdateLoginProfile", "iam:GetLoginProfile"]
+        Resource = aws_iam_user.admin.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:CreateSecret", "secretsmanager:PutSecretValue", "secretsmanager:TagResource"]
+        Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:openclaw/admin-password-*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["ssm:PutParameter"]
+        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/openclaw/admin-console-url"
+      }
+    ]
+  })
+}
+
+data "archive_file" "admin_password" {
+  type        = "zip"
+  output_path = "${path.module}/.lambda_zips/admin_password.zip"
+
+  source {
+    content  = <<-PYTHON
+import json, string, secrets, boto3
+
+def handler(event, context):
+    print(f"[INFO] Event: {json.dumps(event)}")
+    account_id = event['account_id']
+    region = event['region']
+
+    try:
+        alphabet = string.ascii_letters + string.digits + '!@#$%^&*'
+        password = ''.join(secrets.choice(alphabet) for _ in range(24))
+
+        iam = boto3.client('iam')
+        try:
+            iam.create_login_profile(
+                UserName='inceptionstack-admin',
+                Password=password,
+                PasswordResetRequired=True
+            )
+            print("[OK] Login profile created")
+        except iam.exceptions.EntityAlreadyExistsException:
+            iam.update_login_profile(
+                UserName='inceptionstack-admin',
+                Password=password,
+                PasswordResetRequired=True
+            )
+            print("[OK] Login profile updated")
+
+        sm = boto3.client('secretsmanager', region_name=region)
+        secret_name = 'openclaw/admin-password'
+        secret_value = json.dumps({
+            'username': 'inceptionstack-admin',
+            'password': password,
+            'console_url': f'https://{account_id}.signin.aws.amazon.com/console'
+        })
+        try:
+            sm.create_secret(
+                Name=secret_name,
+                SecretString=secret_value,
+                Tags=[{'Key': 'ManagedBy', 'Value': 'Terraform'}]
+            )
+            print("[OK] Secret created")
+        except sm.exceptions.ResourceExistsException:
+            sm.put_secret_value(
+                SecretId=secret_name,
+                SecretString=secret_value
+            )
+            print("[OK] Secret updated")
+
+        ssm = boto3.client('ssm', region_name=region)
+        ssm.put_parameter(
+            Name='/openclaw/admin-console-url',
+            Value=f'https://{account_id}.signin.aws.amazon.com/console',
+            Type='String',
+            Overwrite=True
+        )
+        print("[OK] Console URL written to SSM")
+
+        return {'status': 'SUCCESS', 'console_url': f'https://{account_id}.signin.aws.amazon.com/console'}
+    except Exception as e:
+        print(f"[FAIL] {e}")
+        return {'status': 'FAILED', 'error': str(e)}
+    PYTHON
+    filename = "index.py"
+  }
+}
+
+resource "aws_lambda_function" "admin_password" {
+  function_name    = "${var.environment_name}-admin-password"
+  role             = aws_iam_role.admin_password_lambda.arn
+  handler          = "index.handler"
+  runtime          = "python3.12"
+  timeout          = 30
+  filename         = data.archive_file.admin_password.output_path
+  source_code_hash = data.archive_file.admin_password.output_base64sha256
+
+  depends_on = [aws_iam_role_policy.admin_password]
+}
+
+resource "null_resource" "admin_password_invoke" {
+  depends_on = [aws_lambda_function.admin_password, aws_iam_user.admin]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws lambda invoke \
+        --function-name "${var.environment_name}-admin-password" \
+        --payload '${jsonencode({ account_id = data.aws_caller_identity.current.account_id, region = data.aws_region.current.name })}' \
+        --cli-binary-format raw-in-base64-out \
+        --region us-east-1 \
+        /tmp/admin_password_response.json && cat /tmp/admin_password_response.json
+    EOT
+  }
+}
+
+# ============================================================================
+# EC2 Instance
+# ============================================================================
+resource "aws_instance" "main" {
+  ami                    = data.aws_ssm_parameter.al2023_ami.value
+  instance_type          = var.instance_type
+  iam_instance_profile   = aws_iam_instance_profile.main.name
+  key_name               = var.key_pair_name != "" ? var.key_pair_name : null
+  subnet_id              = aws_subnet.public.id
+  vpc_security_group_ids = [aws_security_group.main.id]
+  ebs_optimized          = true
+
+  root_block_device {
+    volume_size           = var.root_volume_size
+    volume_type           = "gp3"
+    delete_on_termination = true
+    encrypted             = true
+  }
+
+  user_data_base64 = base64encode(templatefile("${path.module}/userdata.sh.tpl", {
+    acct_id          = data.aws_caller_identity.current.account_id
+    region           = data.aws_region.current.name
+    environment_name = var.environment_name
+    default_model    = var.default_model
+    bedrock_region   = var.bedrock_region
+    gw_port          = var.openclaw_gateway_port
+    model_mode       = var.model_mode
+    litellm_base_url = var.litellm_base_url
+    litellm_api_key  = var.litellm_api_key
+    litellm_model    = var.litellm_model
+    provider_api_key = var.provider_api_key
+    bootstrap_url    = var.bootstrap_script_url
+  }))
+
+  tags = {
+    Name        = "${var.environment_name}-instance"
+    Application = "OpenClaw"
+  }
+
+  depends_on = [
+    aws_internet_gateway.main,
+    null_resource.bedrock_form_invoke,
+  ]
+}
+
+resource "aws_ebs_volume" "data" {
+  availability_zone = data.aws_availability_zones.available.names[0]
+  size              = var.data_volume_size
+  type              = "gp3"
+  encrypted         = true
+
+  tags = {
+    Name = "${var.environment_name}-data"
+  }
+}
+
+resource "aws_volume_attachment" "data" {
+  device_name = "/dev/sdb"
+  volume_id   = aws_ebs_volume.data.id
+  instance_id = aws_instance.main.id
+}
