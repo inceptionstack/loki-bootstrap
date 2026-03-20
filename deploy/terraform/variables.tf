@@ -147,3 +147,33 @@ variable "request_quota_increases" {
     error_message = "Must be true or false."
   }
 }
+
+variable "enable_security_hub" {
+  type        = bool
+  default     = true
+  description = "Enable AWS Security Hub — aggregates security findings from multiple services into a single dashboard. Enables CIS Benchmarks and AWS Foundational Security Best Practices standards. (~$0.001 per finding/month)"
+}
+
+variable "enable_guardduty" {
+  type        = bool
+  default     = true
+  description = "Enable Amazon GuardDuty — provides intelligent threat detection by analyzing CloudTrail, VPC Flow Logs, and DNS queries. Alerts on suspicious activity like cryptocurrency mining, data exfiltration, or unauthorized access. (~$4/million events)"
+}
+
+variable "enable_inspector" {
+  type        = bool
+  default     = true
+  description = "Enable Amazon Inspector — automatically scans EC2 instances, container images, and Lambda functions for software vulnerabilities and unintended network exposure. (~$0.01-$1.25 per resource/month)"
+}
+
+variable "enable_access_analyzer" {
+  type        = bool
+  default     = true
+  description = "Enable IAM Access Analyzer — identifies resources shared with external entities and validates IAM policies. Helps ensure least-privilege access. (Free)"
+}
+
+variable "enable_config_recorder" {
+  type        = bool
+  default     = true
+  description = "Enable AWS Config Recorder — records resource configuration changes and evaluates compliance against rules. Required by Security Hub for many checks. (~$0.003 per item recorded/month)"
+}

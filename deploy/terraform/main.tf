@@ -344,109 +344,130 @@ def handler(event, context):
     account_id = boto3.client('sts').get_caller_identity()['Account']
     results = []
 
+    enable_sh = event.get('enable_security_hub', True)
+    enable_gd = event.get('enable_guardduty', True)
+    enable_insp = event.get('enable_inspector', True)
+    enable_aa = event.get('enable_access_analyzer', True)
+    enable_cfg = event.get('enable_config_recorder', True)
+
     # 1. Security Hub
-    try:
-        sh = boto3.client('securityhub', region_name=region)
+    if enable_sh:
         try:
-            sh.describe_hub()
-            print("[OK] Security Hub already enabled")
-        except:
-            sh.enable_security_hub(EnableDefaultStandards=True)
-            print("[OK] Security Hub enabled")
-        results.append('SecurityHub:OK')
-    except Exception as e:
-        print(f"[WARN] Security Hub: {e}")
-        results.append('SecurityHub:WARN')
+            sh = boto3.client('securityhub', region_name=region)
+            try:
+                sh.describe_hub()
+                print("[OK] Security Hub already enabled")
+            except:
+                sh.enable_security_hub(EnableDefaultStandards=True)
+                print("[OK] Security Hub enabled")
+            results.append('SecurityHub:OK')
+        except Exception as e:
+            print(f"[WARN] Security Hub: {e}")
+            results.append('SecurityHub:WARN')
+    else:
+        results.append('SecurityHub:SKIPPED')
 
     # 2. GuardDuty
-    try:
-        gd = boto3.client('guardduty', region_name=region)
-        detectors = gd.list_detectors()['DetectorIds']
-        if detectors:
-            print(f"[OK] GuardDuty already enabled: {detectors[0]}")
-        else:
-            resp = gd.create_detector(Enable=True, FindingPublishingFrequency='FIFTEEN_MINUTES')
-            print(f"[OK] GuardDuty enabled: {resp['DetectorId']}")
-        results.append('GuardDuty:OK')
-    except Exception as e:
-        print(f"[WARN] GuardDuty: {e}")
-        results.append('GuardDuty:WARN')
+    if enable_gd:
+        try:
+            gd = boto3.client('guardduty', region_name=region)
+            detectors = gd.list_detectors()['DetectorIds']
+            if detectors:
+                print(f"[OK] GuardDuty already enabled: {detectors[0]}")
+            else:
+                resp = gd.create_detector(Enable=True, FindingPublishingFrequency='FIFTEEN_MINUTES')
+                print(f"[OK] GuardDuty enabled: {resp['DetectorId']}")
+            results.append('GuardDuty:OK')
+        except Exception as e:
+            print(f"[WARN] GuardDuty: {e}")
+            results.append('GuardDuty:WARN')
+    else:
+        results.append('GuardDuty:SKIPPED')
 
     # 3. Inspector
-    try:
-        insp = boto3.client('inspector2', region_name=region)
-        insp.enable(resourceTypes=['EC2', 'ECR', 'LAMBDA', 'LAMBDA_CODE'], accountIds=[account_id])
-        print("[OK] Inspector enabled (EC2, ECR, Lambda)")
-        results.append('Inspector:OK')
-    except Exception as e:
-        print(f"[WARN] Inspector: {e}")
-        results.append('Inspector:WARN')
+    if enable_insp:
+        try:
+            insp = boto3.client('inspector2', region_name=region)
+            insp.enable(resourceTypes=['EC2', 'ECR', 'LAMBDA', 'LAMBDA_CODE'], accountIds=[account_id])
+            print("[OK] Inspector enabled (EC2, ECR, Lambda)")
+            results.append('Inspector:OK')
+        except Exception as e:
+            print(f"[WARN] Inspector: {e}")
+            results.append('Inspector:WARN')
+    else:
+        results.append('Inspector:SKIPPED')
 
     # 4. IAM Access Analyzer
-    try:
-        aa = boto3.client('accessanalyzer', region_name=region)
-        analyzers = aa.list_analyzers(type='ACCOUNT')['analyzers']
-        if analyzers:
-            print(f"[OK] Access Analyzer already exists: {analyzers[0]['name']}")
-        else:
-            aa.create_analyzer(analyzerName='account-analyzer', type='ACCOUNT')
-            print("[OK] Access Analyzer created")
-        results.append('AccessAnalyzer:OK')
-    except Exception as e:
-        print(f"[WARN] Access Analyzer: {e}")
-        results.append('AccessAnalyzer:WARN')
+    if enable_aa:
+        try:
+            aa = boto3.client('accessanalyzer', region_name=region)
+            analyzers = aa.list_analyzers(type='ACCOUNT')['analyzers']
+            if analyzers:
+                print(f"[OK] Access Analyzer already exists: {analyzers[0]['name']}")
+            else:
+                aa.create_analyzer(analyzerName='account-analyzer', type='ACCOUNT')
+                print("[OK] Access Analyzer created")
+            results.append('AccessAnalyzer:OK')
+        except Exception as e:
+            print(f"[WARN] Access Analyzer: {e}")
+            results.append('AccessAnalyzer:WARN')
+    else:
+        results.append('AccessAnalyzer:SKIPPED')
 
     # 5. Config Recorder
-    try:
-        cfg = boto3.client('config', region_name=region)
-        recorders = cfg.describe_configuration_recorders()['ConfigurationRecorders']
-        if recorders:
-            print(f"[OK] Config recorder already exists: {recorders[0]['name']}")
-        else:
-            s3 = boto3.client('s3', region_name=region)
-            bucket_name = f'config-bucket-{account_id}-{region}'
-            try:
-                s3.create_bucket(Bucket=bucket_name)
-                s3.put_bucket_policy(Bucket=bucket_name, Policy=json.dumps({
-                    'Version': '2012-10-17',
-                    'Statement': [{
-                        'Sid': 'AWSConfigBucketPermissionsCheck',
-                        'Effect': 'Allow',
-                        'Principal': {'Service': 'config.amazonaws.com'},
-                        'Action': 's3:GetBucketAcl',
-                        'Resource': f'arn:aws:s3:::{bucket_name}'
-                    }, {
-                        'Sid': 'AWSConfigBucketDelivery',
-                        'Effect': 'Allow',
-                        'Principal': {'Service': 'config.amazonaws.com'},
-                        'Action': 's3:PutObject',
-                        'Resource': f'arn:aws:s3:::{bucket_name}/*',
-                        'Condition': {'StringEquals': {'s3:x-amz-acl': 'bucket-owner-full-control'}}
-                    }]
-                }))
-            except s3.exceptions.BucketAlreadyOwnedByYou:
-                pass
-            except Exception as be:
-                print(f"[WARN] Config bucket: {be}")
+    if enable_cfg:
+        try:
+            cfg = boto3.client('config', region_name=region)
+            recorders = cfg.describe_configuration_recorders()['ConfigurationRecorders']
+            if recorders:
+                print(f"[OK] Config recorder already exists: {recorders[0]['name']}")
+            else:
+                s3 = boto3.client('s3', region_name=region)
+                bucket_name = f'config-bucket-{account_id}-{region}'
+                try:
+                    s3.create_bucket(Bucket=bucket_name)
+                    s3.put_bucket_policy(Bucket=bucket_name, Policy=json.dumps({
+                        'Version': '2012-10-17',
+                        'Statement': [{
+                            'Sid': 'AWSConfigBucketPermissionsCheck',
+                            'Effect': 'Allow',
+                            'Principal': {'Service': 'config.amazonaws.com'},
+                            'Action': 's3:GetBucketAcl',
+                            'Resource': f'arn:aws:s3:::{bucket_name}'
+                        }, {
+                            'Sid': 'AWSConfigBucketDelivery',
+                            'Effect': 'Allow',
+                            'Principal': {'Service': 'config.amazonaws.com'},
+                            'Action': 's3:PutObject',
+                            'Resource': f'arn:aws:s3:::{bucket_name}/*',
+                            'Condition': {'StringEquals': {'s3:x-amz-acl': 'bucket-owner-full-control'}}
+                        }]
+                    }))
+                except s3.exceptions.BucketAlreadyOwnedByYou:
+                    pass
+                except Exception as be:
+                    print(f"[WARN] Config bucket: {be}")
 
-            try:
-                cfg.put_configuration_recorder(ConfigurationRecorder={
-                    'name': 'default',
-                    'roleARN': f'arn:aws:iam::{account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig',
-                    'recordingGroup': {'allSupported': True, 'includeGlobalResourceTypes': True}
-                })
-                cfg.put_delivery_channel(DeliveryChannel={
-                    'name': 'default',
-                    's3BucketName': bucket_name,
-                })
-                cfg.start_configuration_recorder(ConfigurationRecorderName='default')
-                print("[OK] Config recorder started")
-            except Exception as ce:
-                print(f"[WARN] Config recorder: {ce}")
-        results.append('Config:OK')
-    except Exception as e:
-        print(f"[WARN] Config: {e}")
-        results.append('Config:WARN')
+                try:
+                    cfg.put_configuration_recorder(ConfigurationRecorder={
+                        'name': 'default',
+                        'roleARN': f'arn:aws:iam::{account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig',
+                        'recordingGroup': {'allSupported': True, 'includeGlobalResourceTypes': True}
+                    })
+                    cfg.put_delivery_channel(DeliveryChannel={
+                        'name': 'default',
+                        's3BucketName': bucket_name,
+                    })
+                    cfg.start_configuration_recorder(ConfigurationRecorderName='default')
+                    print("[OK] Config recorder started")
+                except Exception as ce:
+                    print(f"[WARN] Config recorder: {ce}")
+            results.append('Config:OK')
+        except Exception as e:
+            print(f"[WARN] Config: {e}")
+            results.append('Config:WARN')
+    else:
+        results.append('Config:SKIPPED')
 
     return {'results': ', '.join(results)}
     PYTHON
@@ -473,7 +494,7 @@ resource "null_resource" "security_enablement_invoke" {
     command = <<-EOT
       aws lambda invoke \
         --function-name "${var.environment_name}-security-enable" \
-        --payload '{}' \
+        --payload '{"enable_security_hub":${var.enable_security_hub},"enable_guardduty":${var.enable_guardduty},"enable_inspector":${var.enable_inspector},"enable_access_analyzer":${var.enable_access_analyzer},"enable_config_recorder":${var.enable_config_recorder}}' \
         --cli-binary-format raw-in-base64-out \
         --region us-east-1 \
         /tmp/security_enable_response.json && cat /tmp/security_enable_response.json
