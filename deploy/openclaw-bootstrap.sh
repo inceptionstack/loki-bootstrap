@@ -4,16 +4,19 @@ LOGFILE="/var/log/openclaw-setup.log"
 exec > >(tee $LOGFILE) 2>&1
 
 # Args passed via environment
-# ACCT_ID, REGION, STACK_NAME, DEFAULT_MODEL, BEDROCK_REGION, GW_PORT
+# ACCT_ID, REGION, DEFAULT_MODEL, BEDROCK_REGION, GW_PORT
 # MODEL_MODE, LITELLM_BASE_URL, LITELLM_API_KEY, LITELLM_MODEL, PROVIDER_API_KEY
+# STACK_NAME (optional — only set by CloudFormation/SAM deploys)
 
 step() { echo ""; echo "========================================"; echo "[STEP] $(date -u '+%H:%M:%S') $1"; echo "========================================"; }
 ok()   { echo "[OK]    $(date -u '+%H:%M:%S') $1"; }
 fail() { echo "[FAIL]  $(date -u '+%H:%M:%S') $1"; }
 info() { echo "[INFO]  $(date -u '+%H:%M:%S') $1"; }
 
+STACK_NAME="${STACK_NAME:-}"
+
 step "OpenClaw Instance Setup"
-info "Account: $ACCT_ID | Region: $REGION | Stack: $STACK_NAME"
+info "Account: $ACCT_ID | Region: $REGION${STACK_NAME:+ | Stack: $STACK_NAME}"
 info "Model: $DEFAULT_MODEL | Mode: $MODEL_MODE"
 info "Instance: $(curl -sf http://169.254.169.254/latest/meta-data/instance-id || echo unknown)"
 
@@ -246,7 +249,7 @@ step "Setup Complete"
 ok "All done at $(date -u)"
 touch /tmp/openclaw-setup-done
 
-# ---- Signal CloudFormation (skip if no CFN stack) ----
-if aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" &>/dev/null; then
+# ---- Signal CloudFormation (only for CFN/SAM deploys) ----
+if [[ -n "$STACK_NAME" ]] && aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" &>/dev/null; then
   /opt/aws/bin/cfn-signal -e 0 --stack "$STACK_NAME" --resource Instance --region "$REGION"
 fi
