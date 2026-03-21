@@ -49,6 +49,22 @@ toggle() {
 
 require_cmd() { command -v "$1" &>/dev/null || fail "$2"; }
 
+# Verify AWS credentials with specific error messages
+verify_aws_credentials() {
+  local sts_output sts_rc
+  sts_output=$(aws sts get-caller-identity 2>&1)
+  sts_rc=$?
+  if [[ $sts_rc -ne 0 ]]; then
+    warn "aws sts get-caller-identity failed:"
+    warn "$sts_output"
+    if aws configure list 2>/dev/null | grep -q '<not set>'; then
+      fail "AWS credentials not configured. Run 'aws configure' first."
+    else
+      fail "AWS credentials are configured (profile: ${AWS_PROFILE:-default}) but authentication failed. Refresh your session or check your credential process."
+    fi
+  fi
+}
+
 # ============================================================================
 # Reusable AWS helpers
 # ============================================================================
@@ -129,11 +145,9 @@ preflight_checks() {
   require_cmd aws "AWS CLI not found. Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
   ok "AWS CLI: $(aws --version 2>&1 | head -1)"
 
-  aws sts get-caller-identity &>/dev/null \
-    || fail "AWS credentials not configured. Run 'aws configure' first."
-
-  ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-  CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text)
+  verify_aws_credentials
+  ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
+  CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null)
   REGION=$(aws configure get region 2>/dev/null || echo "us-east-1")
 
   ok "Identity: ${CALLER_ARN}"
