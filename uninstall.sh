@@ -7,6 +7,7 @@
 set -euo pipefail
 
 UNINSTALLER_VERSION="0.1.0"
+REPO_URL="https://github.com/inceptionstack/loki-agent.git"
 
 # ============================================================================
 # UI helpers (shared with install.sh)
@@ -219,12 +220,29 @@ confirm_destruction() {
   echo -e "  The following will be ${RED}${BOLD}PERMANENTLY DESTROYED${NC}:"
   echo ""
   for i in "${TARGETS[@]}"; do
+    local method="${METHODS[$i]}"
     echo -e "    ${RED}✗${NC} ${VPC_IDS[$i]}  (${WATERMARKS[$i]}) — VPC, EC2, IAM, security services, all resources"
+
+    # Show planned teardown method
+    if [[ "$method" == "terraform" ]]; then
+      local bucket="${TF_BUCKETS[$i]:-}"
+      if [[ -n "$bucket" ]] && aws s3api head-object --bucket "$bucket" --key "${TF_KEYS[$i]}" --region "$SCAN_REGION" &>/dev/null; then
+        echo -e "      ${BOLD}Teardown:${NC} terraform destroy (state: s3://${bucket}/${TF_KEYS[$i]})"
+      else
+        [[ -n "$bucket" ]] \
+          && echo -e "      ${YELLOW}State bucket s3://${bucket} — state file not found${NC}" \
+          || echo -e "      ${YELLOW}No Terraform state tags found on VPC${NC}"
+        echo -e "      ${BOLD}Teardown:${NC} manual resource cleanup (no terraform state available)"
+      fi
+    elif [[ "$method" == "cloudformation" || "$method" == "sam" ]]; then
+      echo -e "      ${BOLD}Teardown:${NC} CloudFormation stack delete"
+    else
+      echo -e "      ${BOLD}Teardown:${NC} manual resource cleanup"
+    fi
   done
   echo ""
   warn "EC2 instance data will be LOST. EBS volumes will be DELETED."
   warn "Security services (GuardDuty, SecurityHub, etc.) may be disabled."
-  warn "CloudFormation stacks will be deleted if found."
   echo ""
 
   confirm "Are you SURE you want to destroy these deployments?" || { echo "Aborted."; exit 0; }
@@ -251,13 +269,19 @@ remove_deployment() {
   echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
   # Try CloudFormation stack deletion first (cleanest path)
-  if try_delete_cfn_stack "$watermark" "$vpc_id"; then
+  if [[ "$method" != "terraform" ]] && try_delete_cfn_stack "$watermark" "$vpc_id"; then
     ok "Deployment ${watermark} removed via CloudFormation"
     return
   fi
 
-  # Manual cleanup for Terraform or orphaned resources
-  info "No matching CloudFormation stack — cleaning up resources manually..."
+  # Try terraform destroy if state is available
+  if [[ "$method" == "terraform" ]] && try_terraform_destroy "$idx"; then
+    ok "Deployment ${watermark} removed via terraform destroy"
+    return
+  fi
+
+  # Manual cleanup fallback
+  info "Falling back to manual resource cleanup..."
   terminate_instances "$vpc_id"
   delete_security_groups "$vpc_id"
   delete_subnets "$vpc_id"
@@ -311,6 +335,95 @@ try_delete_cfn_stack() {
   done
 
   return 1  # No matching stack found
+}
+
+# ============================================================================
+# Terraform destroy (when state is available)
+# ============================================================================
+try_terraform_destroy() {
+  local idx="$1"
+  local bucket="${TF_BUCKETS[$idx]:-}"
+  local key="${TF_KEYS[$idx]:-}"
+  local lock="${TF_LOCKS[$idx]:-}"
+  local watermark="${WATERMARKS[$idx]}"
+
+  # Need terraform CLI
+  if ! command -v terraform &>/dev/null; then
+    warn "Terraform CLI not found — cannot use terraform destroy"
+    return 1
+  fi
+
+  # Need state bucket
+  if [[ -z "$bucket" ]]; then
+    warn "No Terraform state bucket tagged on VPC — cannot use terraform destroy"
+    return 1
+  fi
+
+  # Verify state file exists
+  if ! aws s3api head-object --bucket "$bucket" --key "$key" --region "$SCAN_REGION" &>/dev/null; then
+    warn "Terraform state file not found at s3://${bucket}/${key}"
+    return 1
+  fi
+
+  info "Using terraform destroy with state from s3://${bucket}/${key}"
+
+  # Clone repo to temp dir for the terraform config
+  local tf_dir; tf_dir=$(mktemp -d)/loki-agent
+  info "Cloning loki-agent for Terraform config..."
+  git clone --depth 1 "$REPO_URL" "$tf_dir" 2>&1 | tail -1
+  cd "$tf_dir/deploy/terraform"
+
+  # Write backend config pointing to existing state
+  cat > backend.tf <<EOF
+terraform {
+  backend "s3" {
+    bucket         = "${bucket}"
+    key            = "${key}"
+    region         = "${SCAN_REGION}"
+$([ -n "$lock" ] && echo "    dynamodb_table = \"${lock}\"")
+    encrypt        = true
+  }
+}
+EOF
+
+  # Init with the remote state
+  info "Initializing Terraform..."
+  if ! terraform init -input=false -reconfigure >/dev/null 2>&1; then
+    warn "Terraform init failed — falling back to manual cleanup"
+    rm -rf "$tf_dir"
+    return 1
+  fi
+
+  # Destroy
+  info "Running terraform destroy (this may take several minutes)..."
+  local destroy_log; destroy_log=$(mktemp)
+  set +e
+  terraform destroy -auto-approve > "$destroy_log" 2>&1
+  local rc=$?
+  set -e
+
+  # Show progress
+  grep -E 'Destroying\.\.\.|Destruction complete|Destroy complete' "$destroy_log" | while IFS= read -r line; do
+    if [[ "$line" == *"Destroying..."* ]]; then
+      echo -e "  ${RED}-${NC} ${line##*] }"
+    elif [[ "$line" == *"Destruction complete"* ]]; then
+      echo -e "  ${GREEN}✓${NC} ${line##*] }"
+    elif [[ "$line" == *"Destroy complete"* ]]; then
+      echo -e "\n  ${GREEN}${line}${NC}"
+    fi
+  done
+
+  if [[ $rc -ne 0 ]]; then
+    warn "Terraform destroy failed:"
+    cat "$destroy_log"
+    rm -f "$destroy_log"
+    rm -rf "$tf_dir"
+    return 1
+  fi
+
+  rm -f "$destroy_log"
+  rm -rf "$tf_dir"
+  return 0
 }
 
 # ============================================================================
