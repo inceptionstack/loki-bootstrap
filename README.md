@@ -5,6 +5,8 @@
 > bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
 > ```
 > Requires: AWS CLI configured, admin access on a dedicated AWS account. The script walks you through everything.
+>
+> After your first chat, run the [Bootstrap Scripts](https://github.com/inceptionstack/loki-agent/wiki/Bootstrap-Scripts-Guide) to set up security, skills, memory search, and more.
 
 ---
 
