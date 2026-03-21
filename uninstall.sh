@@ -9,9 +9,10 @@ export AWS_PAGER=""
 
 UNINSTALLER_VERSION="0.1.0"
 REPO_URL="https://github.com/inceptionstack/loki-agent.git"
+DEFAULT_TF_STATE_KEY="loki-agent/terraform.tfstate"
 
 # ============================================================================
-# UI helpers (shared with install.sh)
+# UI helpers
 # ============================================================================
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 
@@ -39,7 +40,10 @@ confirm() {
 
 require_cmd() { command -v "$1" &>/dev/null || fail "$2"; }
 
-# Verify AWS credentials with specific error messages
+# ============================================================================
+# AWS helpers
+# ============================================================================
+
 verify_aws_credentials() {
   local sts_output sts_rc
   sts_output=$(aws sts get-caller-identity 2>&1)
@@ -50,19 +54,58 @@ verify_aws_credentials() {
     if aws configure list 2>/dev/null | grep -q '<not set>'; then
       fail "AWS credentials not configured. Run 'aws configure' first."
     else
-      fail "AWS credentials are configured (profile: ${AWS_PROFILE:-default}) but authentication failed. Refresh your session or check your credential process."
+      fail "Credentials configured (profile: ${AWS_PROFILE:-default}) but auth failed. Refresh session or check credential process."
     fi
   fi
 }
 
+# Get a single tag value from a resource. Returns "" if not found.
+get_tag() {
+  local resource_id="$1" tag_key="$2"
+  local val
+  val=$(aws ec2 describe-tags \
+    --filters "Name=resource-id,Values=${resource_id}" "Name=key,Values=${tag_key}" \
+    --region "$SCAN_REGION" --query 'Tags[0].Value' --output text 2>/dev/null || echo "")
+  [[ "$val" == "None" ]] && val=""
+  echo "$val"
+}
+
+# List EC2 resources in a VPC. Usage: list_vpc_resources <vpc_id> <resource_type> <jq_query>
+# Returns space-separated IDs.
+list_vpc_resources() {
+  local vpc_id="$1" filter_type="$2" query="$3"
+  aws ec2 "$filter_type" --filters "Name=vpc-id,Values=${vpc_id}" \
+    --region "$SCAN_REGION" --query "$query" --output text 2>/dev/null || echo ""
+}
+
+# Resolve the TF state bucket for a deployment (tagged or conventional).
+resolve_tf_state() {
+  local idx="$1"
+  _TF_BUCKET="${TF_BUCKETS[$idx]:-}"
+  _TF_KEY="${TF_KEYS[$idx]:-$DEFAULT_TF_STATE_KEY}"
+  _TF_LOCK="${TF_LOCKS[$idx]:-}"
+
+  # Fall back to conventional names
+  if [[ -z "$_TF_BUCKET" ]]; then
+    _TF_BUCKET="${WATERMARKS[$idx]}-tfstate-${ACCOUNT_ID}"
+    _TF_LOCK="${WATERMARKS[$idx]}-tflock"
+  fi
+}
+
+# Check if TF state file exists at the resolved location.
+tf_state_exists() {
+  aws s3api head-bucket --bucket "$_TF_BUCKET" --region "$SCAN_REGION" 2>/dev/null \
+    && aws s3api head-object --bucket "$_TF_BUCKET" --key "$_TF_KEY" --region "$SCAN_REGION" &>/dev/null
+}
+
 # ============================================================================
-# Banner
+# Phase: Banner
 # ============================================================================
 show_banner() {
   echo ""
   echo -e "${RED}╔══════════════════════════════════════════════╗${NC}"
   echo -e "${RED}║     🗑️  Loki Agent — Uninstaller             ║${NC}"
-  echo -e "${RED}║     v${UNINSTALLER_VERSION}                                     ║${NC}"
+  printf "${RED}║${NC}  %-42s${RED}║${NC}\n" "v${UNINSTALLER_VERSION}"
   echo -e "${RED}╚══════════════════════════════════════════════╝${NC}"
   echo ""
   warn "This script ${BOLD}permanently destroys${NC}${YELLOW} Loki deployments and all their resources."
@@ -71,11 +114,10 @@ show_banner() {
 }
 
 # ============================================================================
-# Pre-flight
+# Phase: Pre-flight
 # ============================================================================
 preflight() {
   info "Running pre-flight checks..."
-
   require_cmd aws "AWS CLI not found. Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
   ok "AWS CLI: $(aws --version 2>&1 | head -1)"
 
@@ -91,34 +133,28 @@ preflight() {
 }
 
 # ============================================================================
-# Discovery: find all Loki deployments
+# Phase: Discovery
 # ============================================================================
 discover_deployments() {
   prompt "AWS region to scan" SCAN_REGION "$REGION"
   echo ""
   info "Scanning for Loki deployments in ${SCAN_REGION}..."
 
-  # Find tagged VPCs (all deploy methods tag the VPC)
-  VPCS_RAW=$(aws ec2 describe-vpcs \
+  local raw
+  raw=$(aws ec2 describe-vpcs \
     --filters "Name=tag:loki:managed,Values=true" \
     --region "$SCAN_REGION" \
     --query 'Vpcs[*].[VpcId, Tags[?Key==`loki:watermark`].Value|[0], Tags[?Key==`loki:deploy-method`].Value|[0], Tags[?Key==`Name`].Value|[0]]' \
     --output text 2>/dev/null || echo "")
 
-  if [[ -z "$VPCS_RAW" ]]; then
+  if [[ -z "$raw" ]]; then
     ok "No Loki deployments found in ${SCAN_REGION}"
     exit 0
   fi
 
-  # Build arrays
   DEPLOY_COUNT=0
-  VPC_IDS=()
-  WATERMARKS=()
-  METHODS=()
-  NAMES=()
-  TF_BUCKETS=()
-  TF_KEYS=()
-  TF_LOCKS=()
+  VPC_IDS=(); WATERMARKS=(); METHODS=(); NAMES=()
+  TF_BUCKETS=(); TF_KEYS=(); TF_LOCKS=()
 
   while IFS=$'\t' read -r vpc_id watermark method name; do
     VPC_IDS+=("$vpc_id")
@@ -126,41 +162,33 @@ discover_deployments() {
     METHODS+=("${method:-unknown}")
     NAMES+=("${name:-unnamed}")
 
-    # Fetch Terraform state tags if this was a terraform deploy
-    local tf_bucket="" tf_key="" tf_lock=""
+    # Fetch TF state tags for terraform deploys
     if [[ "${method:-}" == "terraform" ]]; then
-      tf_bucket=$(aws ec2 describe-tags --filters "Name=resource-id,Values=${vpc_id}" "Name=key,Values=loki:tf-state-bucket" \
-        --region "$SCAN_REGION" --query 'Tags[0].Value' --output text 2>/dev/null || echo "")
-      [[ "$tf_bucket" == "None" ]] && tf_bucket=""
-      tf_key=$(aws ec2 describe-tags --filters "Name=resource-id,Values=${vpc_id}" "Name=key,Values=loki:tf-state-key" \
-        --region "$SCAN_REGION" --query 'Tags[0].Value' --output text 2>/dev/null || echo "")
-      [[ "$tf_key" == "None" ]] && tf_key=""
-      tf_lock=$(aws ec2 describe-tags --filters "Name=resource-id,Values=${vpc_id}" "Name=key,Values=loki:tf-lock-table" \
-        --region "$SCAN_REGION" --query 'Tags[0].Value' --output text 2>/dev/null || echo "")
-      [[ "$tf_lock" == "None" ]] && tf_lock=""
+      TF_BUCKETS+=("$(get_tag "$vpc_id" "loki:tf-state-bucket")")
+      TF_KEYS+=("$(get_tag "$vpc_id" "loki:tf-state-key")")
+      TF_LOCKS+=("$(get_tag "$vpc_id" "loki:tf-lock-table")")
+    else
+      TF_BUCKETS+=(""); TF_KEYS+=(""); TF_LOCKS+=("")
     fi
-    TF_BUCKETS+=("$tf_bucket")
-    TF_KEYS+=("$tf_key")
-    TF_LOCKS+=("$tf_lock")
-
     DEPLOY_COUNT=$((DEPLOY_COUNT + 1))
-  done <<< "$VPCS_RAW"
+  done <<< "$raw"
 
+  print_deployments
+}
+
+print_deployments() {
   echo ""
   echo -e "  ${BOLD}Found ${DEPLOY_COUNT} Loki deployment(s):${NC}"
   echo ""
   for i in $(seq 0 $((DEPLOY_COUNT - 1))); do
-    local idx=$((i + 1))
-    echo -e "    ${BOLD}${idx})${NC} ${VPC_IDS[$i]}  watermark=${YELLOW}${WATERMARKS[$i]}${NC}  method=${METHODS[$i]}  name=${NAMES[$i]}"
+    echo -e "    ${BOLD}$((i+1)))${NC} ${VPC_IDS[$i]}  watermark=${YELLOW}${WATERMARKS[$i]}${NC}  method=${METHODS[$i]}  name=${NAMES[$i]}"
 
-    # Show associated resources summary
-    local instance_count
-    instance_count=$(aws ec2 describe-instances \
+    local count
+    count=$(aws ec2 describe-instances \
       --filters "Name=vpc-id,Values=${VPC_IDS[$i]}" "Name=instance-state-name,Values=running,stopped" \
       --region "$SCAN_REGION" --query 'length(Reservations[].Instances[])' --output text 2>/dev/null || echo "0")
-    echo -e "       EC2 instances: ${instance_count}"
+    echo -e "       EC2 instances: ${count}"
 
-    # Show TF state info if available
     if [[ -n "${TF_BUCKETS[$i]}" ]]; then
       echo -e "       TF state: s3://${TF_BUCKETS[$i]}/${TF_KEYS[$i]}"
       [[ -n "${TF_LOCKS[$i]}" ]] && echo -e "       TF lock:  ${TF_LOCKS[$i]}"
@@ -170,7 +198,7 @@ discover_deployments() {
 }
 
 # ============================================================================
-# Selection: which deployments to remove
+# Phase: Selection
 # ============================================================================
 select_targets() {
   if [[ "$DEPLOY_COUNT" -eq 1 ]]; then
@@ -187,11 +215,8 @@ select_targets() {
   local choice
   prompt "Which to remove" choice "a"
 
-  if [[ "$choice" == "a" || "$choice" == "A" ]]; then
-    TARGETS=()
-    for i in $(seq 0 $((DEPLOY_COUNT - 1))); do
-      TARGETS+=("$i")
-    done
+  if [[ "$choice" =~ ^[aA]$ ]]; then
+    TARGETS=($(seq 0 $((DEPLOY_COUNT - 1))))
   else
     TARGETS=()
     for num in $choice; do
@@ -203,14 +228,11 @@ select_targets() {
       fi
     done
   fi
-
-  if [[ ${#TARGETS[@]} -eq 0 ]]; then
-    fail "No valid deployments selected"
-  fi
+  [[ ${#TARGETS[@]} -gt 0 ]] || fail "No valid deployments selected"
 }
 
 # ============================================================================
-# Confirmation gauntlet
+# Phase: Confirmation
 # ============================================================================
 confirm_destruction() {
   echo ""
@@ -220,30 +242,12 @@ confirm_destruction() {
   echo ""
   echo -e "  The following will be ${RED}${BOLD}PERMANENTLY DESTROYED${NC}:"
   echo ""
+
   for i in "${TARGETS[@]}"; do
-    local method="${METHODS[$i]}"
-    echo -e "    ${RED}✗${NC} ${VPC_IDS[$i]}  (${WATERMARKS[$i]}) — VPC, EC2, IAM, security services, all resources"
-
-    # Show planned teardown method
-    if [[ "$method" == "terraform" ]]; then
-      local bucket="${TF_BUCKETS[$i]:-}"
-      local key="${TF_KEYS[$i]:-loki-agent/terraform.tfstate}"
-      # Fall back to conventional name if no tags
-      [[ -z "$bucket" ]] && bucket="${WATERMARKS[$i]}-tfstate-${ACCOUNT_ID}"
-
-      if aws s3api head-bucket --bucket "$bucket" --region "$SCAN_REGION" 2>/dev/null \
-         && aws s3api head-object --bucket "$bucket" --key "$key" --region "$SCAN_REGION" &>/dev/null; then
-        echo -e "      ${BOLD}Teardown:${NC} terraform destroy (state: s3://${bucket}/${key})"
-      else
-        echo -e "      ${YELLOW}Terraform state not found (tried s3://${bucket}/${key})${NC}"
-        echo -e "      ${BOLD}Teardown:${NC} manual resource cleanup"
-      fi
-    elif [[ "$method" == "cloudformation" || "$method" == "sam" ]]; then
-      echo -e "      ${BOLD}Teardown:${NC} CloudFormation stack delete"
-    else
-      echo -e "      ${BOLD}Teardown:${NC} manual resource cleanup"
-    fi
+    echo -e "    ${RED}✗${NC} ${VPC_IDS[$i]}  (${WATERMARKS[$i]}) — VPC, EC2, IAM, all resources"
+    print_teardown_plan "$i"
   done
+
   echo ""
   warn "EC2 instance data will be LOST. EBS volumes will be DELETED."
   warn "Security services (GuardDuty, SecurityHub, etc.) may be disabled."
@@ -258,52 +262,58 @@ confirm_destruction() {
   echo ""
 }
 
+print_teardown_plan() {
+  local i="$1" method="${METHODS[$1]}"
+  case "$method" in
+    terraform)
+      resolve_tf_state "$i"
+      if tf_state_exists; then
+        echo -e "      ${BOLD}Teardown:${NC} terraform destroy (state: s3://${_TF_BUCKET}/${_TF_KEY})"
+      else
+        echo -e "      ${YELLOW}TF state not found (tried s3://${_TF_BUCKET}/${_TF_KEY})${NC}"
+        echo -e "      ${BOLD}Teardown:${NC} manual resource cleanup"
+      fi ;;
+    cloudformation|sam)
+      echo -e "      ${BOLD}Teardown:${NC} CloudFormation stack delete" ;;
+    *)
+      echo -e "      ${BOLD}Teardown:${NC} manual resource cleanup" ;;
+  esac
+}
+
 # ============================================================================
-# Removal: delete a single deployment
+# Removal: orchestrator
 # ============================================================================
 remove_deployment() {
   local idx="$1"
-  local vpc_id="${VPC_IDS[$idx]}"
-  local watermark="${WATERMARKS[$idx]}"
-  local method="${METHODS[$idx]}"
+  local vpc_id="${VPC_IDS[$idx]}" watermark="${WATERMARKS[$idx]}" method="${METHODS[$idx]}"
 
   echo ""
   echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
   info "Removing deployment: ${watermark} (${vpc_id})"
   echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-  # Try CloudFormation stack deletion first (cleanest path)
-  if [[ "$method" != "terraform" ]] && try_delete_cfn_stack "$watermark" "$vpc_id"; then
-    ok "Deployment ${watermark} removed via CloudFormation"
-    return
+  # Strategy 1: CloudFormation stack delete (CFN/SAM deploys)
+  if [[ "$method" != "terraform" ]] && try_delete_cfn_stack "$vpc_id"; then
+    ok "Deployment ${watermark} removed via CloudFormation"; return
   fi
 
-  # Try terraform destroy if state is available
+  # Strategy 2: terraform destroy (Terraform deploys with state)
   if [[ "$method" == "terraform" ]] && try_terraform_destroy "$idx"; then
-    ok "Deployment ${watermark} removed via terraform destroy"
-    return
+    ok "Deployment ${watermark} removed via terraform destroy"; return
   fi
 
-  # Manual cleanup fallback — order matters: instances first, then network
+  # Strategy 3: manual resource-by-resource cleanup
   info "Falling back to manual resource cleanup..."
-  terminate_instances "$vpc_id"
-  delete_network_interfaces "$vpc_id"
-  delete_security_groups "$vpc_id"
-  delete_subnets "$vpc_id"
-  delete_route_tables "$vpc_id"
-  detach_and_delete_igw "$vpc_id"
-  delete_vpc "$vpc_id"
-  delete_iam_resources "$watermark"
+  manual_vpc_cleanup "$vpc_id"
+  cleanup_iam_resources "$watermark"
   ok "Deployment ${watermark} removed"
 }
 
 # ============================================================================
-# CloudFormation stack deletion
+# Strategy 1: CloudFormation stack delete
 # ============================================================================
 try_delete_cfn_stack() {
-  local watermark="$1" vpc_id="$2"
-
-  # Search for stacks that created this VPC
+  local vpc_id="$1"
   local stacks
   stacks=$(aws cloudformation list-stacks \
     --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
@@ -311,151 +321,101 @@ try_delete_cfn_stack() {
     --query 'StackSummaries[*].StackName' --output text 2>/dev/null || echo "")
 
   for stack_name in $stacks; do
-    # Check if this stack owns the VPC
     local stack_vpc
     stack_vpc=$(aws cloudformation describe-stack-resources \
       --stack-name "$stack_name" --region "$SCAN_REGION" \
       --query "StackResources[?ResourceType=='AWS::EC2::VPC'].PhysicalResourceId" \
       --output text 2>/dev/null || echo "")
 
-    if [[ "$stack_vpc" == *"$vpc_id"* ]]; then
-      info "Found CloudFormation stack: ${stack_name}"
-      info "Deleting stack (this takes 5-10 minutes)..."
+    [[ "$stack_vpc" == *"$vpc_id"* ]] || continue
 
-      aws cloudformation delete-stack --stack-name "$stack_name" --region "$SCAN_REGION"
+    info "Found CloudFormation stack: ${stack_name}"
+    info "Deleting stack (this takes 5-10 minutes)..."
+    aws cloudformation delete-stack --stack-name "$stack_name" --region "$SCAN_REGION"
 
-      while true; do
-        local status
-        status=$(aws cloudformation describe-stacks --stack-name "$stack_name" --region "$SCAN_REGION" \
-          --query 'Stacks[0].StackStatus' --output text 2>&1 || echo "DELETE_COMPLETE")
-        echo -ne "\r  Status: ${status}              "
-        case "$status" in
-          DELETE_COMPLETE)       echo ""; return 0 ;;
-          *DELETE_FAILED*)       echo ""; warn "Stack delete failed — falling back to manual cleanup"; return 1 ;;
-          *does\ not\ exist*)   echo ""; return 0 ;;
-          *)                    sleep 15 ;;
-        esac
-      done
-    fi
+    while true; do
+      local status
+      status=$(aws cloudformation describe-stacks --stack-name "$stack_name" --region "$SCAN_REGION" \
+        --query 'Stacks[0].StackStatus' --output text 2>&1 || echo "DELETE_COMPLETE")
+      echo -ne "\r  Status: ${status}              "
+      case "$status" in
+        DELETE_COMPLETE)     echo ""; return 0 ;;
+        *DELETE_FAILED*)     echo ""; warn "Stack delete failed — will try manual cleanup"; return 1 ;;
+        *does\ not\ exist*) echo ""; return 0 ;;
+        *)                   sleep 15 ;;
+      esac
+    done
   done
-
-  return 1  # No matching stack found
+  return 1
 }
 
 # ============================================================================
-# Terraform destroy (when state is available)
+# Strategy 2: Terraform destroy
 # ============================================================================
 try_terraform_destroy() {
   local idx="$1"
-  local bucket="${TF_BUCKETS[$idx]:-}"
-  local key="${TF_KEYS[$idx]:-loki-agent/terraform.tfstate}"
-  local lock="${TF_LOCKS[$idx]:-}"
-  local watermark="${WATERMARKS[$idx]}"
+  command -v terraform &>/dev/null || { warn "Terraform CLI not found"; return 1; }
 
-  # Need terraform CLI
-  if ! command -v terraform &>/dev/null; then
-    warn "Terraform CLI not found — cannot use terraform destroy"
-    return 1
-  fi
+  resolve_tf_state "$idx"
+  tf_state_exists || { warn "TF state not found at s3://${_TF_BUCKET}/${_TF_KEY}"; return 1; }
 
-  # If no bucket tagged, try conventional name
-  if [[ -z "$bucket" ]]; then
-    bucket="${watermark}-tfstate-${ACCOUNT_ID}"
-    lock="${watermark}-tflock"
-    info "No state tags on VPC — trying conventional bucket: ${bucket}"
-  fi
+  info "Using terraform destroy (state: s3://${_TF_BUCKET}/${_TF_KEY})"
 
-  # Verify state bucket + file exist
-  if ! aws s3api head-bucket --bucket "$bucket" --region "$SCAN_REGION" 2>/dev/null; then
-    warn "State bucket s3://${bucket} not found"
-    return 1
-  fi
-  if ! aws s3api head-object --bucket "$bucket" --key "$key" --region "$SCAN_REGION" &>/dev/null; then
-    warn "State file not found at s3://${bucket}/${key}"
-    return 1
-  fi
-
-  info "Using terraform destroy with state from s3://${bucket}/${key}"
-
-  # Clone repo to temp dir for the terraform config
-  local tf_dir; tf_dir=$(mktemp -d)/loki-agent
+  local tf_dir; tf_dir="$(mktemp -d)/loki-agent"
   info "Cloning loki-agent for Terraform config..."
   git clone --depth 1 "$REPO_URL" "$tf_dir" 2>&1 | tail -1
   cd "$tf_dir/deploy/terraform"
 
-  # Write backend config pointing to existing state
   cat > backend.tf <<EOF
 terraform {
   backend "s3" {
-    bucket         = "${bucket}"
-    key            = "${key}"
+    bucket         = "${_TF_BUCKET}"
+    key            = "${_TF_KEY}"
     region         = "${SCAN_REGION}"
-$([ -n "$lock" ] && echo "    dynamodb_table = \"${lock}\"")
+$([ -n "$_TF_LOCK" ] && echo "    dynamodb_table = \"${_TF_LOCK}\"")
     encrypt        = true
   }
 }
 EOF
 
-  # Init with the remote state
   info "Initializing Terraform..."
   if ! terraform init -input=false -reconfigure >/dev/null 2>&1; then
-    warn "Terraform init failed — falling back to manual cleanup"
-    rm -rf "$tf_dir"
-    return 1
+    warn "Terraform init failed"; rm -rf "$tf_dir"; return 1
   fi
 
-  # Destroy
   info "Running terraform destroy (this may take several minutes)..."
-  local destroy_log; destroy_log=$(mktemp)
-  set +e
-  terraform destroy -auto-approve > "$destroy_log" 2>&1
-  local rc=$?
-  set -e
+  local log; log=$(mktemp)
+  set +e; terraform destroy -auto-approve > "$log" 2>&1; local rc=$?; set -e
 
-  # Show progress
-  grep -E 'Destroying\.\.\.|Destruction complete|Destroy complete' "$destroy_log" | while IFS= read -r line; do
-    if [[ "$line" == *"Destroying..."* ]]; then
-      echo -e "  ${RED}-${NC} ${line##*] }"
-    elif [[ "$line" == *"Destruction complete"* ]]; then
-      echo -e "  ${GREEN}✓${NC} ${line##*] }"
-    elif [[ "$line" == *"Destroy complete"* ]]; then
-      echo -e "\n  ${GREEN}${line}${NC}"
+  grep -E 'Destroying\.\.\.|Destruction complete|Destroy complete' "$log" | while IFS= read -r line; do
+    if   [[ "$line" == *"Destroying..."* ]];        then echo -e "  ${RED}-${NC} ${line##*] }"
+    elif [[ "$line" == *"Destruction complete"* ]];  then echo -e "  ${GREEN}✓${NC} ${line##*] }"
+    elif [[ "$line" == *"Destroy complete"* ]];      then echo -e "\n  ${GREEN}${line}${NC}"
     fi
   done
 
   if [[ $rc -ne 0 ]]; then
-    warn "Terraform destroy failed:"
-    cat "$destroy_log"
-    rm -f "$destroy_log"
-    rm -rf "$tf_dir"
-    return 1
+    warn "Terraform destroy failed:"; cat "$log"
   fi
-
-  rm -f "$destroy_log"
-  rm -rf "$tf_dir"
-  return 0
+  rm -f "$log"; rm -rf "$tf_dir"
+  [[ $rc -eq 0 ]]
 }
 
 # ============================================================================
-# Manual resource cleanup (for Terraform deploys or orphans)
+# Strategy 3: Manual VPC cleanup
 # ============================================================================
-terminate_instances() {
+manual_vpc_cleanup() {
   local vpc_id="$1"
-  local instances
-  instances=$(aws ec2 describe-instances \
-    --filters "Name=vpc-id,Values=${vpc_id}" "Name=instance-state-name,Values=running,stopped,stopping" \
-    --region "$SCAN_REGION" \
-    --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null || echo "")
 
+  # 1. Terminate EC2 instances
+  local instances
+  instances=$(list_vpc_resources "$vpc_id" describe-instances \
+    'Reservations[].Instances[?State.Name!=`terminated`].InstanceId[]')
   for iid in $instances; do
     info "Terminating instance: ${iid}"
-    # Disable termination protection if set
-    aws ec2 modify-instance-attribute --instance-id "$iid" --no-disable-api-termination \
-      --region "$SCAN_REGION" 2>/dev/null || true
-    aws ec2 terminate-instances --instance-ids "$iid" --region "$SCAN_REGION" >/dev/null
+    aws ec2 modify-instance-attribute --instance-id "$iid" --no-disable-api-termination --region "$SCAN_REGION" 2>/dev/null || true
+    aws ec2 terminate-instances --instance-ids "$iid" --region "$SCAN_REGION" >/dev/null 2>&1 || true
   done
-
-  # Wait for termination
   if [[ -n "$instances" ]]; then
     info "Waiting for instances to terminate..."
     for iid in $instances; do
@@ -463,254 +423,217 @@ terminate_instances() {
     done
     ok "Instances terminated"
   fi
-}
 
-delete_network_interfaces() {
-  local vpc_id="$1"
+  # 2. Delete ENIs (must happen before SGs)
   local enis
-  enis=$(aws ec2 describe-network-interfaces \
-    --filters "Name=vpc-id,Values=${vpc_id}" \
-    --region "$SCAN_REGION" \
-    --query 'NetworkInterfaces[].NetworkInterfaceId' --output text 2>/dev/null || echo "")
-
+  enis=$(list_vpc_resources "$vpc_id" describe-network-interfaces 'NetworkInterfaces[].NetworkInterfaceId')
   for eni in $enis; do
-    # Detach if attached
-    local attachment
-    attachment=$(aws ec2 describe-network-interfaces --network-interface-ids "$eni" --region "$SCAN_REGION" \
+    local attach
+    attach=$(aws ec2 describe-network-interfaces --network-interface-ids "$eni" --region "$SCAN_REGION" \
       --query 'NetworkInterfaces[0].Attachment.AttachmentId' --output text 2>/dev/null || echo "None")
-    if [[ "$attachment" != "None" && -n "$attachment" ]]; then
-      aws ec2 detach-network-interface --attachment-id "$attachment" --force --region "$SCAN_REGION" 2>/dev/null || true
+    if [[ "$attach" != "None" && -n "$attach" ]]; then
+      aws ec2 detach-network-interface --attachment-id "$attach" --force --region "$SCAN_REGION" 2>/dev/null || true
       sleep 2
     fi
-    info "Deleting network interface: ${eni}"
-    aws ec2 delete-network-interface --network-interface-id "$eni" --region "$SCAN_REGION" 2>/dev/null || warn "Could not delete ENI ${eni}"
+    info "Deleting ENI: ${eni}"
+    aws ec2 delete-network-interface --network-interface-id "$eni" --region "$SCAN_REGION" 2>/dev/null || true
   done
-}
 
-delete_security_groups() {
-  local vpc_id="$1"
+  # 3. Delete security groups (skip default)
   local sgs
-  sgs=$(aws ec2 describe-security-groups \
-    --filters "Name=vpc-id,Values=${vpc_id}" \
-    --region "$SCAN_REGION" \
-    --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text 2>/dev/null || echo "")
-
+  sgs=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=${vpc_id}" \
+    --region "$SCAN_REGION" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text 2>/dev/null || echo "")
   for sg in $sgs; do
-    # Revoke all ingress/egress rules first
-    aws ec2 revoke-security-group-ingress --group-id "$sg" --region "$SCAN_REGION" \
-      --security-group-rule-ids $(aws ec2 describe-security-group-rules \
-        --filters "Name=group-id,Values=$sg" --region "$SCAN_REGION" \
-        --query 'SecurityGroupRules[?!IsEgress].SecurityGroupRuleId' --output text 2>/dev/null) 2>/dev/null || true
-    aws ec2 revoke-security-group-egress --group-id "$sg" --region "$SCAN_REGION" \
-      --security-group-rule-ids $(aws ec2 describe-security-group-rules \
-        --filters "Name=group-id,Values=$sg" --region "$SCAN_REGION" \
-        --query 'SecurityGroupRules[?IsEgress].SecurityGroupRuleId' --output text 2>/dev/null) 2>/dev/null || true
-
-    info "Deleting security group: ${sg}"
-    aws ec2 delete-security-group --group-id "$sg" --region "$SCAN_REGION" 2>/dev/null || warn "Could not delete SG ${sg} (may have dependencies)"
+    # Revoke all rules to break circular dependencies
+    local ingress_rules egress_rules
+    ingress_rules=$(aws ec2 describe-security-group-rules --filters "Name=group-id,Values=$sg" --region "$SCAN_REGION" \
+      --query 'SecurityGroupRules[?!IsEgress].SecurityGroupRuleId' --output text 2>/dev/null || echo "")
+    [[ -n "$ingress_rules" ]] && aws ec2 revoke-security-group-ingress --group-id "$sg" --region "$SCAN_REGION" \
+      --security-group-rule-ids $ingress_rules 2>/dev/null || true
+    egress_rules=$(aws ec2 describe-security-group-rules --filters "Name=group-id,Values=$sg" --region "$SCAN_REGION" \
+      --query 'SecurityGroupRules[?IsEgress].SecurityGroupRuleId' --output text 2>/dev/null || echo "")
+    [[ -n "$egress_rules" ]] && aws ec2 revoke-security-group-egress --group-id "$sg" --region "$SCAN_REGION" \
+      --security-group-rule-ids $egress_rules 2>/dev/null || true
+    info "Deleting SG: ${sg}"
+    aws ec2 delete-security-group --group-id "$sg" --region "$SCAN_REGION" 2>/dev/null || warn "Could not delete SG ${sg}"
   done
-}
 
-delete_subnets() {
-  local vpc_id="$1"
+  # 4. Delete subnets
   local subnets
-  subnets=$(aws ec2 describe-subnets \
-    --filters "Name=vpc-id,Values=${vpc_id}" \
-    --region "$SCAN_REGION" \
-    --query 'Subnets[].SubnetId' --output text 2>/dev/null || echo "")
-
-  for subnet in $subnets; do
-    info "Deleting subnet: ${subnet}"
-    aws ec2 delete-subnet --subnet-id "$subnet" --region "$SCAN_REGION" 2>/dev/null || warn "Could not delete subnet ${subnet}"
+  subnets=$(list_vpc_resources "$vpc_id" describe-subnets 'Subnets[].SubnetId')
+  for s in $subnets; do
+    info "Deleting subnet: ${s}"
+    aws ec2 delete-subnet --subnet-id "$s" --region "$SCAN_REGION" 2>/dev/null || warn "Could not delete subnet ${s}"
   done
-}
 
-delete_route_tables() {
-  local vpc_id="$1"
+  # 5. Delete non-main route tables
   local rts
-  rts=$(aws ec2 describe-route-tables \
-    --filters "Name=vpc-id,Values=${vpc_id}" \
-    --region "$SCAN_REGION" \
+  rts=$(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=${vpc_id}" --region "$SCAN_REGION" \
     --query 'RouteTables[?length(Associations[?Main==`true`])==`0`].RouteTableId' --output text 2>/dev/null || echo "")
-
   for rt in $rts; do
-    # Disassociate first
     local assocs
     assocs=$(aws ec2 describe-route-tables --route-table-ids "$rt" --region "$SCAN_REGION" \
       --query 'RouteTables[0].Associations[].RouteTableAssociationId' --output text 2>/dev/null || echo "")
-    for assoc in $assocs; do
-      aws ec2 disassociate-route-table --association-id "$assoc" --region "$SCAN_REGION" 2>/dev/null || true
+    for a in $assocs; do
+      aws ec2 disassociate-route-table --association-id "$a" --region "$SCAN_REGION" 2>/dev/null || true
     done
     info "Deleting route table: ${rt}"
-    aws ec2 delete-route-table --route-table-id "$rt" --region "$SCAN_REGION" 2>/dev/null || warn "Could not delete RT ${rt}"
+    aws ec2 delete-route-table --route-table-id "$rt" --region "$SCAN_REGION" 2>/dev/null || true
   done
-}
 
-detach_and_delete_igw() {
-  local vpc_id="$1"
+  # 6. Detach + delete internet gateways
   local igws
-  igws=$(aws ec2 describe-internet-gateways \
-    --filters "Name=attachment.vpc-id,Values=${vpc_id}" \
-    --region "$SCAN_REGION" \
-    --query 'InternetGateways[].InternetGatewayId' --output text 2>/dev/null || echo "")
-
+  igws=$(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=${vpc_id}" \
+    --region "$SCAN_REGION" --query 'InternetGateways[].InternetGatewayId' --output text 2>/dev/null || echo "")
   for igw in $igws; do
-    info "Detaching internet gateway: ${igw}"
+    info "Detaching + deleting IGW: ${igw}"
     aws ec2 detach-internet-gateway --internet-gateway-id "$igw" --vpc-id "$vpc_id" --region "$SCAN_REGION" 2>/dev/null || true
-    info "Deleting internet gateway: ${igw}"
-    aws ec2 delete-internet-gateway --internet-gateway-id "$igw" --region "$SCAN_REGION" 2>/dev/null || warn "Could not delete IGW ${igw}"
+    aws ec2 delete-internet-gateway --internet-gateway-id "$igw" --region "$SCAN_REGION" 2>/dev/null || true
   done
-}
 
-delete_vpc() {
-  local vpc_id="$1"
+  # 7. Delete VPC
   info "Deleting VPC: ${vpc_id}"
   aws ec2 delete-vpc --vpc-id "$vpc_id" --region "$SCAN_REGION" 2>/dev/null \
     || warn "Could not delete VPC ${vpc_id} — some resources may still depend on it"
 }
 
-delete_iam_resources() {
+# ============================================================================
+# IAM cleanup (roles + users matching watermark with loki:managed tag)
+# ============================================================================
+cleanup_iam_resources() {
   local watermark="$1"
+  cleanup_iam_roles "$watermark"
+  cleanup_iam_users "$watermark"
+}
 
-  # Find IAM roles tagged with this watermark
+# Strip all attachments from an IAM role and delete it
+cleanup_iam_roles() {
+  local watermark="$1"
   local roles
   roles=$(aws iam list-roles --query "Roles[?contains(RoleName, '${watermark}')].RoleName" --output text 2>/dev/null || echo "")
 
   for role in $roles; do
-    # Verify it's a loki-managed role
-    local managed
-    managed=$(aws iam list-role-tags --role-name "$role" \
-      --query "Tags[?Key=='loki:managed'].Value" --output text 2>/dev/null || echo "")
-    [[ "$managed" == "true" ]] || continue
-
+    is_loki_managed_role "$role" || continue
     info "Cleaning up IAM role: ${role}"
-
-    # Detach managed policies
-    local policies
-    policies=$(aws iam list-attached-role-policies --role-name "$role" \
-      --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || echo "")
-    for policy in $policies; do
-      aws iam detach-role-policy --role-name "$role" --policy-arn "$policy" 2>/dev/null || true
-    done
-
-    # Delete inline policies
-    local inline
-    inline=$(aws iam list-role-policies --role-name "$role" \
-      --query 'PolicyNames[]' --output text 2>/dev/null || echo "")
-    for p in $inline; do
-      aws iam delete-role-policy --role-name "$role" --policy-name "$p" 2>/dev/null || true
-    done
-
-    # Remove from instance profiles
-    local profiles
-    profiles=$(aws iam list-instance-profiles-for-role --role-name "$role" \
-      --query 'InstanceProfiles[].InstanceProfileName' --output text 2>/dev/null || echo "")
-    for profile in $profiles; do
-      aws iam remove-role-from-instance-profile --role-name "$role" --instance-profile-name "$profile" 2>/dev/null || true
-      aws iam delete-instance-profile --instance-profile-name "$profile" 2>/dev/null || true
-    done
-
+    detach_all_role_policies "$role"
+    remove_role_from_profiles "$role"
     aws iam delete-role --role-name "$role" 2>/dev/null || warn "Could not delete role ${role}"
   done
+}
 
-  # Find IAM users tagged with this watermark
+is_loki_managed_role() {
+  local val
+  val=$(aws iam list-role-tags --role-name "$1" --query "Tags[?Key=='loki:managed'].Value" --output text 2>/dev/null || echo "")
+  [[ "$val" == "true" ]]
+}
+
+detach_all_role_policies() {
+  local role="$1"
+  # Managed policies
+  local policies
+  policies=$(aws iam list-attached-role-policies --role-name "$role" --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || echo "")
+  for p in $policies; do aws iam detach-role-policy --role-name "$role" --policy-arn "$p" 2>/dev/null || true; done
+  # Inline policies
+  local inline
+  inline=$(aws iam list-role-policies --role-name "$role" --query 'PolicyNames[]' --output text 2>/dev/null || echo "")
+  for p in $inline; do aws iam delete-role-policy --role-name "$role" --policy-name "$p" 2>/dev/null || true; done
+}
+
+remove_role_from_profiles() {
+  local role="$1"
+  local profiles
+  profiles=$(aws iam list-instance-profiles-for-role --role-name "$role" --query 'InstanceProfiles[].InstanceProfileName' --output text 2>/dev/null || echo "")
+  for profile in $profiles; do
+    aws iam remove-role-from-instance-profile --role-name "$role" --instance-profile-name "$profile" 2>/dev/null || true
+    aws iam delete-instance-profile --instance-profile-name "$profile" 2>/dev/null || true
+  done
+}
+
+# Strip all attachments from an IAM user and delete it
+cleanup_iam_users() {
+  local watermark="$1"
   local users
   users=$(aws iam list-users --query "Users[?contains(UserName, '${watermark}')].UserName" --output text 2>/dev/null || echo "")
 
   for user in $users; do
-    local managed_user
-    managed_user=$(aws iam list-user-tags --user-name "$user" \
-      --query "Tags[?Key=='loki:managed'].Value" --output text 2>/dev/null || echo "")
-    [[ "$managed_user" == "true" ]] || continue
-
+    is_loki_managed_user "$user" || continue
     info "Cleaning up IAM user: ${user}"
-
-    # Delete access keys
-    local keys
-    keys=$(aws iam list-access-keys --user-name "$user" \
-      --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null || echo "")
-    for key in $keys; do
-      aws iam delete-access-key --user-name "$user" --access-key-id "$key" 2>/dev/null || true
-    done
-
-    # Detach managed policies
-    local user_policies
-    user_policies=$(aws iam list-attached-user-policies --user-name "$user" \
-      --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || echo "")
-    for policy in $user_policies; do
-      aws iam detach-user-policy --user-name "$user" --policy-arn "$policy" 2>/dev/null || true
-    done
-
-    # Delete inline policies
-    local user_inline
-    user_inline=$(aws iam list-user-policies --user-name "$user" \
-      --query 'PolicyNames[]' --output text 2>/dev/null || echo "")
-    for p in $user_inline; do
-      aws iam delete-user-policy --user-name "$user" --policy-name "$p" 2>/dev/null || true
-    done
-
+    detach_all_user_policies "$user"
+    delete_user_access_keys "$user"
     aws iam delete-user --user-name "$user" 2>/dev/null || warn "Could not delete user ${user}"
   done
 }
 
+is_loki_managed_user() {
+  local val
+  val=$(aws iam list-user-tags --user-name "$1" --query "Tags[?Key=='loki:managed'].Value" --output text 2>/dev/null || echo "")
+  [[ "$val" == "true" ]]
+}
+
+detach_all_user_policies() {
+  local user="$1"
+  local policies
+  policies=$(aws iam list-attached-user-policies --user-name "$user" --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || echo "")
+  for p in $policies; do aws iam detach-user-policy --user-name "$user" --policy-arn "$p" 2>/dev/null || true; done
+  local inline
+  inline=$(aws iam list-user-policies --user-name "$user" --query 'PolicyNames[]' --output text 2>/dev/null || echo "")
+  for p in $inline; do aws iam delete-user-policy --user-name "$user" --policy-name "$p" 2>/dev/null || true; done
+}
+
+delete_user_access_keys() {
+  local user="$1"
+  local keys
+  keys=$(aws iam list-access-keys --user-name "$user" --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null || echo "")
+  for k in $keys; do aws iam delete-access-key --user-name "$user" --access-key-id "$k" 2>/dev/null || true; done
+}
+
 # ============================================================================
-# Cleanup: optional S3/DynamoDB state resources
+# Post-removal: optional state resource cleanup
 # ============================================================================
 offer_state_cleanup() {
   echo ""
   info "Checking for leftover state resources..."
 
-  local found_any=false
-  # Collect unique resources to clean (avoid duplicates)
-  local -a buckets_to_delete=()
-  local -a tables_to_delete=()
+  local -a buckets=() tables=()
+  local found=false
 
   for i in "${TARGETS[@]}"; do
     local wm="${WATERMARKS[$i]}"
 
-    # Use tagged TF state bucket if available, otherwise guess from watermark
-    local tf_bucket="${TF_BUCKETS[$i]:-}"
-    [[ -z "$tf_bucket" ]] && tf_bucket="${wm}-tfstate-${ACCOUNT_ID}"
-    if aws s3api head-bucket --bucket "$tf_bucket" --region "$SCAN_REGION" 2>/dev/null; then
-      found_any=true
-      buckets_to_delete+=("$tf_bucket")
-      echo -e "    Found Terraform state bucket: ${YELLOW}${tf_bucket}${NC}"
+    # TF state bucket (tagged or conventional)
+    resolve_tf_state "$i"
+    if aws s3api head-bucket --bucket "$_TF_BUCKET" --region "$SCAN_REGION" 2>/dev/null; then
+      found=true; buckets+=("$_TF_BUCKET")
+      echo -e "    Terraform state bucket: ${YELLOW}${_TF_BUCKET}${NC}"
     fi
 
-    # Use tagged lock table if available, otherwise guess
-    local tf_lock="${TF_LOCKS[$i]:-}"
-    [[ -z "$tf_lock" ]] && tf_lock="${wm}-tflock"
-    if aws dynamodb describe-table --table-name "$tf_lock" --region "$SCAN_REGION" &>/dev/null; then
-      found_any=true
-      tables_to_delete+=("$tf_lock")
-      echo -e "    Found Terraform lock table:   ${YELLOW}${tf_lock}${NC}"
+    # TF lock table
+    if [[ -n "$_TF_LOCK" ]] && aws dynamodb describe-table --table-name "$_TF_LOCK" --region "$SCAN_REGION" &>/dev/null; then
+      found=true; tables+=("$_TF_LOCK")
+      echo -e "    Terraform lock table:   ${YELLOW}${_TF_LOCK}${NC}"
     fi
 
-    # CFN template bucket (from console deploy)
+    # CFN template bucket
     local cfn_bucket="${wm}-cfn-templates-${ACCOUNT_ID}"
     if aws s3api head-bucket --bucket "$cfn_bucket" --region "$SCAN_REGION" 2>/dev/null; then
-      found_any=true
-      buckets_to_delete+=("$cfn_bucket")
-      echo -e "    Found CFN template bucket:    ${YELLOW}${cfn_bucket}${NC}"
+      found=true; buckets+=("$cfn_bucket")
+      echo -e "    CFN template bucket:    ${YELLOW}${cfn_bucket}${NC}"
     fi
   done
 
-  if ! $found_any; then
-    ok "No leftover state resources found"
-    return
-  fi
+  $found || { ok "No leftover state resources found"; return; }
 
   echo ""
-  if confirm "Delete these state/template resources too?" ; then
-    for bucket in "${buckets_to_delete[@]}"; do
-      aws s3 rb "s3://${bucket}" --force --region "$SCAN_REGION" 2>/dev/null || warn "Could not delete ${bucket}"
-      ok "Deleted bucket: ${bucket}"
-    done
-    for table in "${tables_to_delete[@]}"; do
-      aws dynamodb delete-table --table-name "$table" --region "$SCAN_REGION" >/dev/null 2>&1 || warn "Could not delete ${table}"
-      ok "Deleted lock table: ${table}"
-    done
-  fi
+  confirm "Delete these state/template resources too?" || return
+
+  for b in "${buckets[@]}"; do
+    aws s3 rb "s3://${b}" --force --region "$SCAN_REGION" 2>/dev/null || warn "Could not delete ${b}"
+    ok "Deleted bucket: ${b}"
+  done
+  for t in "${tables[@]}"; do
+    aws dynamodb delete-table --table-name "$t" --region "$SCAN_REGION" >/dev/null 2>&1 || warn "Could not delete ${t}"
+    ok "Deleted table: ${t}"
+  done
 }
 
 # ============================================================================
