@@ -262,7 +262,10 @@ terraform {
 EOF
     fi
 
-    terraform init -input=false 2>&1 | tail -2
+    info "Initializing Terraform..."
+    terraform init -input=false >/dev/null 2>&1
+    ok "Terraform initialized"
+
     info "Deploying (~2-3 minutes)..."
     terraform apply -auto-approve \
       -var="environment_name=${ENV_NAME}" \
@@ -274,7 +277,18 @@ EOF
       -var="enable_inspector=${INSPECTOR}" \
       -var="enable_access_analyzer=${ACCESS_ANALYZER}" \
       -var="enable_config_recorder=${CONFIG_RECORDER}" \
-      2>&1 | tail -10
+      2>&1 | while IFS= read -r line; do
+        # Show resource creation progress, skip noise
+        if [[ "$line" == *": Creating..."* ]]; then
+          echo -e "  ${BLUE}+${NC} ${line##*] }"
+        elif [[ "$line" == *": Creation complete"* ]]; then
+          echo -e "  ${GREEN}✓${NC} ${line##*] }"
+        elif [[ "$line" == *"Apply complete"* ]]; then
+          echo -e "\n  ${GREEN}${line}${NC}"
+        elif [[ "$line" == *"Outputs:"* ]] || [[ "$line" == *" = "* ]]; then
+          echo "  $line"
+        fi
+      done
 
     INSTANCE_ID=$(terraform output -raw instance_id)
     PUBLIC_IP=$(terraform output -raw public_ip)
