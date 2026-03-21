@@ -226,13 +226,16 @@ confirm_destruction() {
     # Show planned teardown method
     if [[ "$method" == "terraform" ]]; then
       local bucket="${TF_BUCKETS[$i]:-}"
-      if [[ -n "$bucket" ]] && aws s3api head-object --bucket "$bucket" --key "${TF_KEYS[$i]}" --region "$SCAN_REGION" &>/dev/null; then
-        echo -e "      ${BOLD}Teardown:${NC} terraform destroy (state: s3://${bucket}/${TF_KEYS[$i]})"
+      local key="${TF_KEYS[$i]:-loki-agent/terraform.tfstate}"
+      # Fall back to conventional name if no tags
+      [[ -z "$bucket" ]] && bucket="${WATERMARKS[$i]}-tfstate-${ACCOUNT_ID}"
+
+      if aws s3api head-bucket --bucket "$bucket" --region "$SCAN_REGION" 2>/dev/null \
+         && aws s3api head-object --bucket "$bucket" --key "$key" --region "$SCAN_REGION" &>/dev/null; then
+        echo -e "      ${BOLD}Teardown:${NC} terraform destroy (state: s3://${bucket}/${key})"
       else
-        [[ -n "$bucket" ]] \
-          && echo -e "      ${YELLOW}State bucket s3://${bucket} — state file not found${NC}" \
-          || echo -e "      ${YELLOW}No Terraform state tags found on VPC${NC}"
-        echo -e "      ${BOLD}Teardown:${NC} manual resource cleanup (no terraform state available)"
+        echo -e "      ${YELLOW}Terraform state not found (tried s3://${bucket}/${key})${NC}"
+        echo -e "      ${BOLD}Teardown:${NC} manual resource cleanup"
       fi
     elif [[ "$method" == "cloudformation" || "$method" == "sam" ]]; then
       echo -e "      ${BOLD}Teardown:${NC} CloudFormation stack delete"
@@ -280,9 +283,10 @@ remove_deployment() {
     return
   fi
 
-  # Manual cleanup fallback
+  # Manual cleanup fallback — order matters: instances first, then network
   info "Falling back to manual resource cleanup..."
   terminate_instances "$vpc_id"
+  delete_network_interfaces "$vpc_id"
   delete_security_groups "$vpc_id"
   delete_subnets "$vpc_id"
   delete_route_tables "$vpc_id"
@@ -343,7 +347,7 @@ try_delete_cfn_stack() {
 try_terraform_destroy() {
   local idx="$1"
   local bucket="${TF_BUCKETS[$idx]:-}"
-  local key="${TF_KEYS[$idx]:-}"
+  local key="${TF_KEYS[$idx]:-loki-agent/terraform.tfstate}"
   local lock="${TF_LOCKS[$idx]:-}"
   local watermark="${WATERMARKS[$idx]}"
 
@@ -353,15 +357,20 @@ try_terraform_destroy() {
     return 1
   fi
 
-  # Need state bucket
+  # If no bucket tagged, try conventional name
   if [[ -z "$bucket" ]]; then
-    warn "No Terraform state bucket tagged on VPC — cannot use terraform destroy"
-    return 1
+    bucket="${watermark}-tfstate-${ACCOUNT_ID}"
+    lock="${watermark}-tflock"
+    info "No state tags on VPC — trying conventional bucket: ${bucket}"
   fi
 
-  # Verify state file exists
+  # Verify state bucket + file exist
+  if ! aws s3api head-bucket --bucket "$bucket" --region "$SCAN_REGION" 2>/dev/null; then
+    warn "State bucket s3://${bucket} not found"
+    return 1
+  fi
   if ! aws s3api head-object --bucket "$bucket" --key "$key" --region "$SCAN_REGION" &>/dev/null; then
-    warn "Terraform state file not found at s3://${bucket}/${key}"
+    warn "State file not found at s3://${bucket}/${key}"
     return 1
   fi
 
@@ -453,6 +462,28 @@ terminate_instances() {
     done
     ok "Instances terminated"
   fi
+}
+
+delete_network_interfaces() {
+  local vpc_id="$1"
+  local enis
+  enis=$(aws ec2 describe-network-interfaces \
+    --filters "Name=vpc-id,Values=${vpc_id}" \
+    --region "$SCAN_REGION" \
+    --query 'NetworkInterfaces[].NetworkInterfaceId' --output text 2>/dev/null || echo "")
+
+  for eni in $enis; do
+    # Detach if attached
+    local attachment
+    attachment=$(aws ec2 describe-network-interfaces --network-interface-ids "$eni" --region "$SCAN_REGION" \
+      --query 'NetworkInterfaces[0].Attachment.AttachmentId' --output text 2>/dev/null || echo "None")
+    if [[ "$attachment" != "None" && -n "$attachment" ]]; then
+      aws ec2 detach-network-interface --attachment-id "$attachment" --force --region "$SCAN_REGION" 2>/dev/null || true
+      sleep 2
+    fi
+    info "Deleting network interface: ${eni}"
+    aws ec2 delete-network-interface --network-interface-id "$eni" --region "$SCAN_REGION" 2>/dev/null || warn "Could not delete ENI ${eni}"
+  done
 }
 
 delete_security_groups() {
@@ -601,12 +632,20 @@ delete_iam_resources() {
       aws iam delete-access-key --user-name "$user" --access-key-id "$key" 2>/dev/null || true
     done
 
-    # Detach policies
+    # Detach managed policies
     local user_policies
     user_policies=$(aws iam list-attached-user-policies --user-name "$user" \
       --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || echo "")
     for policy in $user_policies; do
       aws iam detach-user-policy --user-name "$user" --policy-arn "$policy" 2>/dev/null || true
+    done
+
+    # Delete inline policies
+    local user_inline
+    user_inline=$(aws iam list-user-policies --user-name "$user" \
+      --query 'PolicyNames[]' --output text 2>/dev/null || echo "")
+    for p in $user_inline; do
+      aws iam delete-user-policy --user-name "$user" --policy-name "$p" 2>/dev/null || true
     done
 
     aws iam delete-user --user-name "$user" 2>/dev/null || warn "Could not delete user ${user}"
