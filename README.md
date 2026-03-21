@@ -1,8 +1,6 @@
 # Loki: Your Stateful Dev/Research/Sec/Ops Agent in your AWS account
 
-> **TL;DR:**
-> What if you gave OpenClaw its own AWS account to manage and control, and ask it to build stuff for you?
-> ```bash
+> **TL;DR: One line Install**
 > bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
 > ```
 > Requires: AWS CLI configured, admin access on a dedicated AWS account. The script walks you through everything.
@@ -10,6 +8,8 @@
 > After your first chat, run the [Bootstrap Scripts](https://github.com/inceptionstack/loki-agent/wiki/Bootstrap-Scripts-Guide) to set up security, skills, memory search, and more.
 
 ---
+## What's this experiment about?
+What if you gave OpenClaw its own AWS account to manage and control, and ask it to build stuff for you?
 
 ## The Problem: Infrastructure Eats Your Time
 
