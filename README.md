@@ -159,7 +159,7 @@ Full deployment guide: [Deploying Loki on AWS](https://github.com/inceptionstack
 | EC2 t4g.medium (24/7) | \~$25                  |
 | EC2 t4g.xlarge (24/7) (recommended for complex dev work) | \~$100                 |
 | EBS volumes (40GB + 80GB) | \~$10                  |
-| Bedrock (moderate use, sonnet 4.6) (recommended: opus 4.6 for main tasks, sonnet 4.6 for subagents) assuming you're building every day. | $300–$2000             |
+| Bedrock (moderate use, sonnet 4.6) (recommended: opus 4.6 for main tasks, sonnet 4.6 for subagents) assuming you're building every day. | $300–$2000 (or much more if you're very active on opus 4.6)             |
 | Security services | \~$5 (individually toggleable) |
 |           |                        |
 |           |                        |
