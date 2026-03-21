@@ -9,7 +9,7 @@
 > After your first chat, run the [Bootstrap Scripts](https://github.com/inceptionstack/loki-agent/wiki/Bootstrap-Scripts-Guide) to set up security, skills, memory search, and more.
 
 ---
-## What's this experiment about?
+## What's This Experiment About?
 What if you gave OpenClaw its own AWS account to manage and control, and ask it to build stuff for you?
 
 ## The Problem: Infrastructure Eats Your Time
