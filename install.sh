@@ -369,6 +369,30 @@ fi
 # Options 2-4: CLI-based deploys — need to clone repo
 # ============================================================================
 
+# Prepare clone directory — pull if exists, clone if not, handle stale state
+prepare_clone() {
+  local dir="$1"
+  if [[ -d "$dir/.git" ]]; then
+    info "Directory exists, pulling latest..."
+    git -C "$dir" pull --ff-only 2>&1 | tail -1
+
+    # Check for stale Terraform state from a previous deploy
+    local tf_dir="$dir/deploy/terraform/.terraform"
+    if [[ -d "$tf_dir" ]]; then
+      warn "Found .terraform/ from a previous deploy in ${dir}"
+      if confirm "  Clean it so Terraform starts fresh?" "default_yes"; then
+        rm -rf "$tf_dir" "$dir/deploy/terraform/backend.tf" "$dir/deploy/terraform/.terraform.lock.hcl"
+        ok "Cleaned stale Terraform state"
+      else
+        fail "Cannot proceed with stale .terraform/ directory. Re-run and choose a different clone location or clean it manually."
+      fi
+    fi
+  else
+    rm -rf "$dir" 2>/dev/null || true
+    git clone --depth 1 https://github.com/inceptionstack/loki-agent.git "$dir" 2>&1 | tail -1
+  fi
+}
+
 # Clone location
 echo ""
 CURRENT_DIR=$(pwd)
@@ -388,14 +412,7 @@ esac
 # Clone repo
 echo ""
 info "Cloning loki-agent into ${CLONE_DIR}..."
-
-if [[ -d "$CLONE_DIR/.git" ]]; then
-  info "Directory exists, pulling latest..."
-  git -C "$CLONE_DIR" pull --ff-only 2>&1 | tail -1
-else
-  rm -rf "$CLONE_DIR" 2>/dev/null || true
-  git clone --depth 1 https://github.com/inceptionstack/loki-agent.git "$CLONE_DIR" 2>&1 | tail -1
-fi
+prepare_clone "$CLONE_DIR"
 cd "$CLONE_DIR"
 ok "Repository ready: ${CLONE_DIR}"
 
@@ -470,7 +487,7 @@ EOF
     info "Initializing Terraform (downloading providers, may take a minute)..."
     TF_INIT_LOG=$(mktemp)
     set +e
-    terraform init -input=false -reconfigure > "$TF_INIT_LOG" 2>&1
+    terraform init -input=false > "$TF_INIT_LOG" 2>&1
     TF_INIT_RC=$?
     set -e
     if [[ $TF_INIT_RC -ne 0 ]]; then
