@@ -47,6 +47,7 @@ Metadata:
         Parameters:
           - OpenClawGatewayPort
           - BootstrapScriptUrl
+          - LokiWatermark
     ParameterLabels:
       EnvironmentName:
         default: "Environment Name"
@@ -94,6 +95,8 @@ Metadata:
         default: "Gateway Port"
       BootstrapScriptUrl:
         default: "Bootstrap Script URL"
+      LokiWatermark:
+        default: "Loki Watermark Tag"
 
 # ============================================================================
 # PARAMETERS
@@ -255,6 +258,11 @@ Parameters:
     AllowedValues: ['true', 'false']
     Description: "AWS Config records resource configuration changes and evaluates compliance against rules. Required by Security Hub for many checks. (~$0.003 per item recorded/month)"
 
+  LokiWatermark:
+    Type: String
+    Default: 'loki-agent'
+    Description: "Custom identifier tag applied to all resources. Use to distinguish multiple Loki deployments or mark team ownership (e.g. 'team-alpha', 'dev-loki')."
+
 # ============================================================================
 # CONDITIONS
 # ============================================================================
@@ -281,6 +289,12 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-vpc'
+        - Key: loki:managed
+          Value: 'true'
+        - Key: loki:watermark
+          Value: !Ref LokiWatermark
+        - Key: loki:deploy-method
+          Value: cloudformation
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -288,6 +302,12 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-igw'
+        - Key: loki:managed
+          Value: 'true'
+        - Key: loki:watermark
+          Value: !Ref LokiWatermark
+        - Key: loki:deploy-method
+          Value: cloudformation
 
   VPCGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -305,6 +325,12 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-public'
+        - Key: loki:managed
+          Value: 'true'
+        - Key: loki:watermark
+          Value: !Ref LokiWatermark
+        - Key: loki:deploy-method
+          Value: cloudformation
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
@@ -313,6 +339,12 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-public-routes'
+        - Key: loki:managed
+          Value: 'true'
+        - Key: loki:watermark
+          Value: !Ref LokiWatermark
+        - Key: loki:deploy-method
+          Value: cloudformation
 
   PublicRoute:
     Type: AWS::EC2::Route
@@ -350,6 +382,12 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-sg'
+        - Key: loki:managed
+          Value: 'true'
+        - Key: loki:watermark
+          Value: !Ref LokiWatermark
+        - Key: loki:deploy-method
+          Value: cloudformation
 
   # --------------------------------------------------------------------------
   # IAM Role & Instance Profile
@@ -371,6 +409,12 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-role'
+        - Key: loki:managed
+          Value: 'true'
+        - Key: loki:watermark
+          Value: !Ref LokiWatermark
+        - Key: loki:deploy-method
+          Value: cloudformation
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -773,6 +817,12 @@ Resources:
           Value: !Sub '${EnvironmentName}-admin'
         - Key: ManagedBy
           Value: StackSet
+        - Key: loki:managed
+          Value: 'true'
+        - Key: loki:watermark
+          Value: !Ref LokiWatermark
+        - Key: loki:deploy-method
+          Value: cloudformation
 
   AdminAccessKey:
     Type: AWS::IAM::AccessKey
@@ -990,6 +1040,14 @@ Resources:
           Value: !Sub '${EnvironmentName}-instance'
         - Key: Application
           Value: OpenClaw
+        - Key: loki:managed
+          Value: 'true'
+        - Key: loki:watermark
+          Value: !Ref LokiWatermark
+        - Key: loki:deploy-method
+          Value: cloudformation
+        - Key: loki:version
+          Value: '1.0'
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash

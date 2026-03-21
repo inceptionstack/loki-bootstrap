@@ -177,3 +177,9 @@ variable "enable_config_recorder" {
   default     = true
   description = "Enable AWS Config Recorder — records resource configuration changes and evaluates compliance against rules. Required by Security Hub for many checks. (~$0.003 per item recorded/month)"
 }
+
+variable "loki_watermark" {
+  type        = string
+  default     = "loki-agent"
+  description = "Custom identifier tag applied to all resources. Use to distinguish multiple Loki deployments or mark team ownership (e.g. 'team-alpha', 'dev-loki')."
+}

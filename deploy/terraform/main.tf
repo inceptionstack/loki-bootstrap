@@ -9,6 +9,15 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+locals {
+  loki_tags = {
+    "loki:managed"       = "true"
+    "loki:watermark"     = var.loki_watermark
+    "loki:deploy-method" = "terraform"
+    "loki:version"       = "1.0"
+  }
+}
+
 # ============================================================================
 # VPC & Networking
 # ============================================================================
@@ -17,17 +26,17 @@ resource "aws_vpc" "main" {
   enable_dns_support   = true
   enable_dns_hostnames = true
 
-  tags = {
+  tags = merge(local.loki_tags, {
     Name = "${var.environment_name}-vpc"
-  }
+  })
 }
 
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
-  tags = {
+  tags = merge(local.loki_tags, {
     Name = "${var.environment_name}-igw"
-  }
+  })
 }
 
 resource "aws_subnet" "public" {
@@ -36,9 +45,9 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = true
   availability_zone       = data.aws_availability_zones.available.names[0]
 
-  tags = {
+  tags = merge(local.loki_tags, {
     Name = "${var.environment_name}-public"
-  }
+  })
 }
 
 resource "aws_route_table" "public" {
@@ -49,9 +58,9 @@ resource "aws_route_table" "public" {
     gateway_id = aws_internet_gateway.main.id
   }
 
-  tags = {
+  tags = merge(local.loki_tags, {
     Name = "${var.environment_name}-public-routes"
-  }
+  })
 }
 
 resource "aws_route_table_association" "public" {
@@ -83,9 +92,9 @@ resource "aws_security_group" "main" {
     description = "All outbound traffic"
   }
 
-  tags = {
+  tags = merge(local.loki_tags, {
     Name = "${var.environment_name}-sg"
-  }
+  })
 }
 
 # ============================================================================
@@ -103,9 +112,9 @@ resource "aws_iam_role" "instance" {
     }]
   })
 
-  tags = {
+  tags = merge(local.loki_tags, {
     Name = "${var.environment_name}-role"
-  }
+  })
 }
 
 resource "aws_iam_role_policy_attachment" "instance_ssm" {
@@ -508,10 +517,10 @@ resource "null_resource" "security_enablement_invoke" {
 resource "aws_iam_user" "admin" {
   name = "${var.environment_name}-admin"
 
-  tags = {
+  tags = merge(local.loki_tags, {
     Name      = "${var.environment_name}-admin"
     ManagedBy = "Terraform"
-  }
+  })
 }
 
 resource "aws_iam_user_policy_attachment" "admin" {
@@ -701,10 +710,10 @@ resource "aws_instance" "main" {
     bootstrap_url    = var.bootstrap_script_url
   }))
 
-  tags = {
+  tags = merge(local.loki_tags, {
     Name        = "${var.environment_name}-instance"
     Application = "OpenClaw"
-  }
+  })
 
   depends_on = [
     aws_internet_gateway.main,
@@ -718,9 +727,9 @@ resource "aws_ebs_volume" "data" {
   type              = "gp3"
   encrypted         = true
 
-  tags = {
+  tags = merge(local.loki_tags, {
     Name = "${var.environment_name}-data"
-  }
+  })
 }
 
 resource "aws_volume_attachment" "data" {
