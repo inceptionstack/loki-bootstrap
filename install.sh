@@ -7,8 +7,8 @@ REPO_URL="https://github.com/inceptionstack/loki-agent.git"
 TEMPLATE_RAW_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml"
 INSTALLER_VERSION="0.3.0"
 # Stamped at release; fall back to git info at runtime
-INSTALLER_COMMIT="${INSTALLER_COMMIT:-__COMMIT__}"
-INSTALLER_DATE="${INSTALLER_DATE:-__DATE__}"
+INSTALLER_COMMIT="${INSTALLER_COMMIT:-e7e8267}"
+INSTALLER_DATE="${INSTALLER_DATE:-2026-03-21 10:30}"
 
 # ============================================================================
 # UI helpers
@@ -103,7 +103,7 @@ run_or_fail() {
 show_banner() {
   # Resolve commit/date from git if running from a clone, otherwise use stamped values
   local commit="$INSTALLER_COMMIT" date="$INSTALLER_DATE"
-  if [[ "$commit" == "__COMMIT__" ]] && command -v git &>/dev/null; then
+  if [[ "$commit" == "e7e8267" ]] && command -v git &>/dev/null; then
     local script_dir; script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
     if [[ -d "$script_dir/.git" ]]; then
       commit=$(git -C "$script_dir" rev-parse --short HEAD 2>/dev/null || echo "unknown")
