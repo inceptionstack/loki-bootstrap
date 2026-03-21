@@ -5,6 +5,7 @@
 # Finds all Loki deployments in your account (by loki:managed tag),
 # lets you pick which to remove, and cleans up all resources.
 set -euo pipefail
+export AWS_PAGER=""
 
 UNINSTALLER_VERSION="0.1.0"
 REPO_URL="https://github.com/inceptionstack/loki-agent.git"
