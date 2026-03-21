@@ -1,25 +1,10 @@
 # Loki: Your Stateful Dev/Research/Sec/Ops Agent in your AWS account
 
-> **TL;DR**
->
-> **Easiest — deploy from your browser (no tools needed):**
->
-> <a href="https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent" target="_blank">☁️ Launch Stack in AWS Console (us-east-1)</a>
->
-> **us-east-1:**
-> ```
-> https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent
-> ```
->
-> **Other regions** — replace `us-east-1` with your region:
-> ```
-> https://<your-region>.console.aws.amazon.com/cloudformation/home?region=<your-region>#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent
-> ```
->
-> **Or use the interactive installer (requires AWS CLI):**
+> **TL;DR — one command to deploy:**
 > ```
 > bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
 > ```
+> Requires: AWS CLI configured, admin access on a dedicated AWS account. The script walks you through everything.
 >
 > After your first chat, run the [Bootstrap Scripts](https://github.com/inceptionstack/loki-agent/wiki/Bootstrap-Scripts-Guide) to set up security, skills, memory search, and more.
 
@@ -122,38 +107,15 @@ Loki is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-sour
 
 ## Getting Started
 
-### Option 1: AWS Console (easiest — no tools needed)
-
-Click the link to open the CloudFormation stack wizard in your browser. Review the parameters (defaults work out of the box), check the IAM acknowledgement box, and click **Create stack**.
-
-<a href="https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent" target="_blank"><strong>☁️ Launch Stack in us-east-1</strong></a>
-
-**us-east-1:**
-```
-https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent
-```
-
-**Other regions** — replace `us-east-1` with your region:
-```
-https://<your-region>.console.aws.amazon.com/cloudformation/home?region=<your-region>#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent
-```
-
-After ~10 minutes, find the Instance ID in the stack **Outputs** tab, then:
-
-```bash
-aws ssm start-session --target <instance-id> --region us-east-1
-openclaw tui
-```
-
-### Option 2: Interactive installer (requires AWS CLI)
+### Option 1: One-command install (recommended)
 
 ```bash
 bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
 ```
 
-The installer lets you choose between CloudFormation CLI, SAM, or Terraform. It verifies credentials, checks permissions, deploys everything, and monitors progress until Loki is ready.
+The installer verifies your AWS credentials, checks permissions, lets you pick an instance size and deployment method (CloudFormation/SAM/Terraform), deploys everything, and monitors progress until Loki is ready.
 
-### Option 3: Manual deploy
+### Option 2: Manual deploy
 
 ```bash
 # Clone
