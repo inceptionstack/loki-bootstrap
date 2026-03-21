@@ -61,11 +61,14 @@ preflight() {
   require_cmd aws "AWS CLI not found. Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
   ok "AWS CLI: $(aws --version 2>&1 | head -1)"
 
-  aws sts get-caller-identity &>/dev/null \
-    || fail "AWS credentials not configured. Run 'aws configure' first."
+  if ! aws sts get-caller-identity &>/dev/null; then
+    warn "Could not verify AWS credentials."
+    warn "Check: aws sts get-caller-identity"
+    fail "AWS credentials not configured or expired. Run 'aws configure' or refresh your session."
+  fi
 
-  ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-  CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text)
+  ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
+  CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null)
   REGION=$(aws configure get region 2>/dev/null || echo "us-east-1")
 
   ok "Identity: ${CALLER_ARN}"
