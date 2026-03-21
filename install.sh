@@ -57,6 +57,7 @@ deploy_cfn_stack() {
       ParameterKey=EnableInspector,ParameterValue="$INSPECTOR" \
       ParameterKey=EnableAccessAnalyzer,ParameterValue="$ACCESS_ANALYZER" \
       ParameterKey=EnableConfigRecorder,ParameterValue="$CONFIG_RECORDER" \
+      ParameterKey=LokiWatermark,ParameterValue="$LOKI_WATERMARK" \
     --output text --query 'StackId'
 
   info "Stack creating... this takes ~8-10 minutes"
@@ -139,6 +140,32 @@ else
 fi
 
 # ============================================================================
+# Detect existing Loki deployments
+# ============================================================================
+echo ""
+info "Checking for existing Loki deployments..."
+
+LOKI_VPCS=$(aws ec2 describe-vpcs \
+  --filters "Name=tag:loki:managed,Values=true" \
+  --region "$REGION" \
+  --query 'Vpcs[*].[VpcId, Tags[?Key==`loki:watermark`].Value|[0], Tags[?Key==`loki:deploy-method`].Value|[0], Tags[?Key==`Name`].Value|[0]]' \
+  --output text 2>/dev/null || echo "")
+
+if [[ -n "$LOKI_VPCS" ]]; then
+  LOKI_COUNT=$(echo "$LOKI_VPCS" | wc -l | tr -d ' ')
+  warn "Found ${LOKI_COUNT} existing Loki deployment(s) in this account/region:"
+  echo ""
+  while IFS=$'\t' read -r vpc_id watermark method name; do
+    echo -e "    ${BOLD}${vpc_id}${NC}  watermark=${watermark:-n/a}  method=${method:-n/a}  name=${name:-n/a}"
+  done <<< "$LOKI_VPCS"
+  echo ""
+  warn "Deploying another Loki will create a separate VPC and resources."
+  confirm "Continue with a new deployment?" || { echo "Aborted."; exit 0; }
+else
+  ok "No existing Loki deployments found"
+fi
+
+# ============================================================================
 # Configuration
 # ============================================================================
 echo ""
@@ -147,6 +174,8 @@ echo ""
 
 prompt "Environment name (lowercase, resource prefix)" ENV_NAME "loki"
 ENV_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
+
+prompt "Loki watermark (tag to identify this deployment)" LOKI_WATERMARK "$ENV_NAME"
 
 echo ""
 echo "  Instance sizes:"
@@ -300,6 +329,7 @@ EOF
       -var="enable_inspector=${INSPECTOR}" \
       -var="enable_access_analyzer=${ACCESS_ANALYZER}" \
       -var="enable_config_recorder=${CONFIG_RECORDER}" \
+      -var="loki_watermark=${LOKI_WATERMARK}" \
       2>&1 | while IFS= read -r line; do
         # Show resource creation progress, skip noise
         if [[ "$line" == *": Creating..."* ]]; then
