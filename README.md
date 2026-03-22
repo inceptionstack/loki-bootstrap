@@ -82,6 +82,64 @@ It does not bundle any clawhub skills (huge security risk there), but comes with
 
 ---
 
+## Loki in Action
+
+Real screenshots from actual usage — building apps, debugging infrastructure, and monitoring security.
+
+### From prompt to deployed app
+
+Describe what you want in plain English. Loki plans the architecture, writes the code, sets up CI/CD, and deploys — all while you watch or go do something else.
+
+<p align="center">
+  <img src="docs/screenshots/loki-telegram-build.jpg" alt="Loki building a full-stack app from a conversational prompt" width="700" />
+</p>
+
+### Architecture planning before writing code
+
+Before touching any code, Loki lays out a full architecture plan — data model, traffic flow, infrastructure components, and deployment strategy. You review and adjust before it starts building.
+
+<p align="center">
+  <img src="docs/screenshots/loki-architecture-plan.jpg" alt="Loki planning full architecture with data model, traffic flow, and infrastructure" width="700" />
+</p>
+
+### Work from anywhere — it remembers everything
+
+Pick up where you left off from any device. Loki has full memory of every project, every decision, every resource it deployed. No context-switching tax.
+
+<p align="center">
+  <img src="docs/screenshots/loki-train-continue.jpg" alt="Continuing a conversation from a phone — Loki remembers the full project context" width="500" />
+</p>
+
+### Proactive morning briefing
+
+Loki doesn't wait for you to ask. It sends daily reports covering AWS costs, security findings, critical CVEs, and pipeline status — before you open your laptop.
+
+<p align="center">
+  <img src="docs/screenshots/loki-morning-briefing.jpg" alt="Loki morning briefing — AWS costs, security findings, CVEs, pipeline status" width="500" />
+</p>
+
+### Security: detect → fix → verify
+
+Loki monitors Security Hub, GuardDuty, and Inspector continuously. When it finds issues, it proposes fixes, executes them, rebuilds container images, and verifies the result — autonomously.
+
+<p align="center">
+  <img src="docs/screenshots/loki-security-fix.jpg" alt="Loki detecting 1 CRITICAL + 19 HIGH security findings and proposing fixes" width="400" />
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/loki-pipeline-deploy.jpg" alt="Loki verifying all CVEs eliminated after autonomous fix" width="400" />
+</p>
+<p align="center"><em>Left: Agent detects CVEs overnight. Right: All CVEs eliminated, app verified working.</em></p>
+
+### Autonomous debugging
+
+When something breaks, Loki traces the issue across VPCs, load balancers, route tables, and DNS — then fixes it and tells you what happened.
+
+<p align="center">
+  <img src="docs/screenshots/loki-debug-fix.jpg" alt="Loki autonomously finding and fixing VPC routing and ALB listener issues" width="500" />
+</p>
+
+
+---
+
 ## How It Works
 
 Loki is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-source AI agent framework. The [loki-agent](https://github.com/inceptionstack/loki-agent) repository packages everything needed to deploy a production-ready Loki instance:
