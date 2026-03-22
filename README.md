@@ -1,4 +1,4 @@
-# Loki: Your Stateful Dev/Research/Ops Agent in your AWS account
+# Loki: Your Stateful Prototyping/Dev/Research/Ops Agent in your AWS account
 
 > **TL;DR — one command to deploy:**
 > ```
