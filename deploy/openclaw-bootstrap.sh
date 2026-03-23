@@ -90,8 +90,8 @@ echo 'eval "$(/home/ec2-user/.local/bin/mise activate bash)"' >> ~/.bashrc
 # Loki aliases
 cat >> ~/.bashrc << 'ALIASES'
 alias loki='openclaw'
-alias lt='openclaw tui'
-alias gr='openclaw gateway restart'
+alias lt='loki tui'
+alias gr='loki gateway restart'
 ALIASES
 export PATH="/home/ec2-user/.local/bin:$PATH"
 eval "$(mise activate bash)"
@@ -225,8 +225,9 @@ cat > /etc/profile.d/loki.sh << 'LOKIPROFILE'
 if [ "$(whoami)" = "ssm-user" ] && [ -z "$LOKI_PROFILE_LOADED" ]; then
   export LOKI_PROFILE_LOADED=1
   printf '\n\033[1;35m🤖 InceptionStack Loki Environment (Based on OpenClaw)\033[0m\n\n'
-  printf '  loki tui    → Launch Loki terminal UI\n'
-  printf '  loki status → Gateway status\n\n'
+  printf '  loki tui              → Launch Loki terminal UI\n'
+  printf '  loki gateway          → Gateway status\n'
+  printf '  loki gateway restart  → Restart gateway\n\n'
   exec sudo -iu ec2-user
 fi
 LOKIPROFILE

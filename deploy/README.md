@@ -57,7 +57,7 @@ aws ssm start-session --target <instance-id> --region us-east-1
 ### Check OpenClaw Status
 
 ```bash
-openclaw status
+loki gateway
 openclaw logs --follow
 ```
 
