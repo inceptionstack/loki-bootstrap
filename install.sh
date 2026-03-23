@@ -54,9 +54,8 @@ require_cmd() { command -v "$1" &>/dev/null || fail "$2"; }
 
 # Verify AWS credentials with specific error messages
 verify_aws_credentials() {
-  local sts_output sts_rc
-  sts_output=$(aws sts get-caller-identity 2>&1)
-  sts_rc=$?
+  local sts_output sts_rc=0
+  sts_output=$(aws sts get-caller-identity 2>&1) || sts_rc=$?
   if [[ $sts_rc -ne 0 ]]; then
     warn "aws sts get-caller-identity failed:"
     warn "$sts_output"
@@ -149,8 +148,8 @@ preflight_checks() {
   ok "AWS CLI: $(aws --version 2>&1 | head -1)"
 
   verify_aws_credentials
-  ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
-  CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null)
+  ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || fail "Could not determine AWS account ID"
+  CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null) || fail "Could not determine caller ARN"
   REGION=$(aws configure get region 2>/dev/null || echo "us-east-1")
 
   ok "Identity: ${CALLER_ARN}"
