@@ -224,7 +224,7 @@ choose_deploy_method() {
   echo -e "    ${GREEN}1) CloudFormation Console${NC} -- opens browser wizard to review & launch"
   echo "    2) CloudFormation CLI     -- deploy from terminal"
   echo "    3) SAM                    -- for SAM CLI users"
-  echo "    4) Terraform              -- for Terraform shops"
+  echo "    4) Terraform              -- for Terraform shops (auto-installs if needed)"
   echo ""
   prompt "Deployment method" DEPLOY_METHOD "1"
 }
@@ -474,9 +474,80 @@ TF_LOCK_TABLE=""
 
 # ============================================================================
 # Deploy: Terraform (option 4)
+# Auto-install Terraform if not present (works on CloudShell, AL2023, Ubuntu, macOS)
+ensure_terraform() {
+  if command -v terraform &>/dev/null; then
+    ok "Terraform: $(terraform version -json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["terraform_version"])' 2>/dev/null || terraform version | head -1)"
+    return 0
+  fi
+
+  echo ""
+  warn "Terraform is not installed."
+  echo ""
+  echo "  Loki can install it automatically for this session."
+  echo "  It will be placed in a local directory — no root/sudo required."
+  echo ""
+
+  if ! confirm "Install Terraform locally now?" "default_yes"; then
+    echo ""
+    echo "  Install it manually:"
+    echo "    https://developer.hashicorp.com/terraform/install"
+    echo ""
+    fail "Terraform is required for Terraform deployments."
+  fi
+
+  info "Installing Terraform..."
+
+  # Detect OS and architecture
+  local os arch
+  os=$(uname -s | tr '[:upper:]' '[:lower:]')
+  case "$(uname -m)" in
+    x86_64|amd64)  arch="amd64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *)             fail "Unsupported architecture: $(uname -m)" ;;
+  esac
+
+  # Get latest stable version from HashiCorp checkpoint
+  local version
+  version=$(curl -sf https://checkpoint-api.hashicorp.com/v1/check/terraform 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["current_version"])' 2>/dev/null \
+    || echo "1.12.1")  # Fallback to known good version
+
+  local zip_url="https://releases.hashicorp.com/terraform/${version}/terraform_${version}_${os}_${arch}.zip"
+  local install_dir="${HOME}/.local/bin"
+  local tmp_zip="/tmp/terraform_${version}.zip"
+
+  info "Downloading Terraform ${version} (${os}/${arch})..."
+  curl -sfL "$zip_url" -o "$tmp_zip" || fail "Failed to download Terraform from ${zip_url}"
+
+  # Unzip — use python3 if unzip not available (CloudShell may not have it)
+  mkdir -p "$install_dir"
+  if command -v unzip &>/dev/null; then
+    unzip -o -q "$tmp_zip" -d "$install_dir"
+  else
+    python3 -c "
+import zipfile, sys
+with zipfile.ZipFile('${tmp_zip}') as z:
+    z.extractall('${install_dir}')
+"
+  fi
+
+  chmod +x "${install_dir}/terraform"
+  rm -f "$tmp_zip"
+
+  # Add to PATH for this session
+  export PATH="${install_dir}:${PATH}"
+
+  if command -v terraform &>/dev/null; then
+    ok "Terraform ${version} installed to ${install_dir}/terraform"
+    ok "$(terraform version | head -1)"
+  else
+    fail "Terraform installed but not found in PATH. Try: export PATH=${install_dir}:\$PATH"
+  fi
+}
 # ============================================================================
 deploy_terraform() {
-  require_cmd terraform "Terraform not found. Install: https://developer.hashicorp.com/terraform/install"
+  ensure_terraform
   cd deploy/terraform
   setup_terraform_backend
   terraform_init
