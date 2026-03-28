@@ -4,6 +4,8 @@
 
 ▶️ [Watch the full walkthrough on YouTube](https://www.youtube.com/watch?v=dJSk8DYlHvI)
 
+📝 [Read the blog post: "I Gave My Agent Its Own AWS Account"](https://robotpaper.ai/i-gave-my-agent-its-own-aws-account-and-now-it-codes-deploys-and-debugs-full-stack-apps/)
+
 > **TL;DR — one command to deploy:**
 > ```
 > bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
