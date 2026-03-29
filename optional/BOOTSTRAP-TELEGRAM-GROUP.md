@@ -21,7 +21,9 @@ If **joining an existing group**, the user needs to provide:
 1. The **group chat ID** (negative number, e.g. `-5085452290`)
 2. The **owner's Telegram user ID** (numeric, e.g. `1775159795`)
 
-Then skip to [Part 1](#part-1-botfather--disable-group-privacy-mode) (still required) and [Part 3](#part-3-configure-openclaw) (use the provided chat ID). Skip Part 2 entirely.
+If they don't know the group chat ID, ask for the **group name** — you can help them find the ID by checking the gateway logs after the bot is added to the group (see Part 2's "Get the Group Chat ID" section).
+
+Then skip to [Part 1](#part-1-botfather--disable-group-privacy-mode) (still required) and [Part 3](#part-3-configure-openclaw) (use the provided chat ID). Skip Part 2's group creation steps, but you may still need the "Get the Group Chat ID" steps if the user doesn't have it.
 
 If **creating a new group**, follow all parts in order.
 
