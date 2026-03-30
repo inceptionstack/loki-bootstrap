@@ -1,11 +1,15 @@
 # Bootstrap Scripts Guide
 
-After deploying Loki, bootstrap scripts configure your agent with security baselines, development tools, and integrations. These scripts live in the `essential/` and `optional/` directories of the [loki-agent](https://github.com/inceptionstack/loki-agent) repository.
+After deploying Loki, bootstrap scripts configure your agent with security baselines, development tools, and integrations. These scripts live in the `bootstraps/` directory of the [loki-agent](https://github.com/inceptionstack/loki-agent) repository, organized into three subdirectories:
+
+- **`bootstraps/essential/`** — Core setup that every Loki instance needs
+- **`bootstraps/optional/`** — Add-ons based on your workflow
+- **`bootstraps/telegram/`** — Telegram chat integration
 
 ## How to Run Bootstraps
 
 Connect to your Loki instance and tell it:
-> "Read the files in the `essential/` folder one by one and execute each bootstrap."
+> "Read the files in the `bootstraps/essential/` folder one by one and execute each bootstrap."
 
 Each bootstrap:
 - Is a markdown file with instructions your agent follows
@@ -54,9 +58,6 @@ Advanced model setup: configure primary/fallback models, LiteLLM proxy routing, 
 
 Add these based on your workflow needs.
 
-### BOOTSTRAP-TELEGRAM.md — Telegram Integration
-Connects Loki to a Telegram bot for chat-based interaction. Includes setup instructions for BotFather and formatting rules for Telegram messages.
-
 ### BOOTSTRAP-WEB-UI.md — Web Control UI
 Exposes the OpenClaw control dashboard via CloudFront + Cognito authentication. Gives you a browser-based interface for managing your agent.
 
@@ -68,3 +69,13 @@ Adds a GitHub Action that runs Claude Code for automatic code review on PRs and 
 
 ### OPTIMIZE-TOO-LARGE-CONTEXT.md — Context Optimization
 Tips for reducing system prompt size when hitting context limits. Covers workspace file pruning, memory consolidation, and skill management.
+
+## Telegram Bootstraps
+
+Set up Telegram as your chat interface with Loki.
+
+### BOOTSTRAP-TELEGRAM.md — Telegram Integration
+Connects Loki to a Telegram bot for chat-based interaction. Includes setup instructions for BotFather and formatting rules for Telegram messages.
+
+### BOOTSTRAP-TELEGRAM-GROUP.md — Telegram Group Chat
+Configures Loki to participate in Telegram group chats with appropriate behavior rules.

@@ -9,6 +9,6 @@ Welcome to the documentation for deploying and managing Loki on AWS.
 ## Quick Links
 
 - [Deployment templates](../deploy/) — CloudFormation, SAM, and Terraform templates
-- [Bootstrap prompts](../essential/) — Essential setup prompts for new Loki instances
+- [Bootstrap prompts](../bootstraps/essential/) — Essential setup prompts for new Loki instances
 - [Brain files](../deploy/brain/) — Template workspace files
 - [OpenClaw docs](https://docs.openclaw.ai) — Official OpenClaw documentation (engine)
