@@ -350,7 +350,8 @@ import json, boto3
 
 def handler(event, context):
     print(f"[INFO] Event: {json.dumps(event)}")
-    region = 'us-east-1'
+    import os
+    region = os.environ.get('AWS_REGION', 'us-east-1')
     account_id = boto3.client('sts').get_caller_identity()['Account']
     results = []
 
@@ -506,7 +507,7 @@ resource "null_resource" "security_enablement_invoke" {
         --function-name "${var.environment_name}-security-enable" \
         --payload '{"enable_security_hub":${var.enable_security_hub},"enable_guardduty":${var.enable_guardduty},"enable_inspector":${var.enable_inspector},"enable_access_analyzer":${var.enable_access_analyzer},"enable_config_recorder":${var.enable_config_recorder}}' \
         --cli-binary-format raw-in-base64-out \
-        --region us-east-1 \
+        --region ${var.aws_region} \
         /tmp/security_enable_response.json && cat /tmp/security_enable_response.json
     EOT
   }
@@ -590,7 +591,7 @@ resource "null_resource" "admin_setup_invoke" {
         --function-name "${var.environment_name}-admin-setup" \
         --payload '${jsonencode({ account_id = data.aws_caller_identity.current.account_id, region = data.aws_region.current.name, admin_username = "${var.environment_name}-admin" })}' \
         --cli-binary-format raw-in-base64-out \
-        --region us-east-1 \
+        --region ${var.aws_region} \
         /tmp/admin_setup_response.json && cat /tmp/admin_setup_response.json
     EOT
   }

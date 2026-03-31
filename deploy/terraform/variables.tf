@@ -1,3 +1,9 @@
+variable "aws_region" {
+  type        = string
+  default     = "us-east-1"
+  description = "AWS region for infrastructure deployment. Defaults to us-east-1."
+}
+
 variable "pack_name" {
   description = "Agent pack to deploy (openclaw or hermes)"
   type        = string
