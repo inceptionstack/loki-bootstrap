@@ -982,9 +982,22 @@ show_complete() {
   local ssm_cmd
   ssm_cmd="$(ssm_connect_cmd "$INSTANCE_ID")"
 
+  # Load pack-specific commands for the completion screen
+  local pack_profile="${CLONE_DIR}/packs/${PACK_NAME}/resources/shell-profile.sh"
+  local pack_commands="loki tui"
+  local pack_emoji="🤖"
+  local pack_name_display="Loki"
+  if [[ -f "$pack_profile" ]]; then
+    source "$pack_profile"
+    pack_emoji="${PACK_BANNER_EMOJI:-🤖}"
+    pack_name_display="${PACK_BANNER_NAME:-Loki}"
+    # Use first non-empty line from PACK_BANNER_COMMANDS as the primary command
+    pack_commands="${PACK_BANNER_COMMANDS}"
+  fi
+
   echo ""
   echo -e "${GREEN}╔══════════════════════════════════════════════╗${NC}"
-  echo -e "${GREEN}║         🤖 Loki is deployed and running!    ║${NC}"
+  echo -e "${GREEN}║    ${pack_emoji} ${pack_name_display} — deployed and running!${NC}"
   echo -e "${GREEN}╚══════════════════════════════════════════════╝${NC}"
   echo ""
   echo -e "  ${BOLD}Instance:${NC}  ${INSTANCE_ID}"
@@ -999,7 +1012,10 @@ show_complete() {
   echo -e "${CYAN}│${NC}                                                              ${CYAN}│${NC}"
   echo -e "${CYAN}│${NC}  ${GREEN}${ssm_cmd}${NC}"
   echo -e "${CYAN}│${NC}                                                              ${CYAN}│${NC}"
-  echo -e "${CYAN}│${NC}  Then run: ${BOLD}loki tui${NC}                                          ${CYAN}│${NC}"
+  echo -e "${CYAN}│${NC}  ${BOLD}Then run:${NC}                                                   ${CYAN}│${NC}"
+  echo -e "${pack_commands}" | while IFS= read -r line; do
+    [[ -n "$line" ]] && echo -e "${CYAN}│${NC}  ${GREEN}${line}${NC}"
+  done
   echo -e "${CYAN}└──────────────────────────────────────────────────────────────┘${NC}"
   echo ""
 
