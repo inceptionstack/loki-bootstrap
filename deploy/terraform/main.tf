@@ -279,7 +279,7 @@ resource "null_resource" "bedrock_form_invoke" {
         --function-name "${var.environment_name}-bedrock-form" \
         --payload '${jsonencode({ request_quotas = var.request_quota_increases })}' \
         --cli-binary-format raw-in-base64-out \
-        --region us-east-1 \
+        --region ${var.aws_region} \
         /tmp/bedrock_form_response.json && cat /tmp/bedrock_form_response.json
     EOT
   }
