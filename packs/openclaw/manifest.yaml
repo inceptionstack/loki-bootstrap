@@ -29,7 +29,7 @@ params:
     description: "Gateway auth token (auto-generated if empty)"
     default: ""
   - name: model-mode
-    description: "bedrock | litellm | provider-key"
+    description: "bedrock | litellm | api-key"
     default: "bedrock"
   - name: litellm-url
     description: "LiteLLM base URL (model-mode=litellm only)"

@@ -1,3 +1,5 @@
+# REFERENCE ONLY — not used by install.sh (bedrockify install-daemon creates its own unit).
+# Kept for documentation and manual installs.
 [Unit]
 Description=Bedrockify — OpenAI-compatible Bedrock Proxy
 After=network-online.target

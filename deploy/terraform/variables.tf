@@ -62,11 +62,11 @@ variable "root_volume_size" {
 variable "data_volume_size" {
   type        = number
   default     = 80
-  description = "Separate data volume for OpenClaw state and workspaces. Set to 0 to skip (uses root volume instead). 80GB recommended for production."
+  description = "Separate data volume for OpenClaw state and workspaces. Set to 0 to skip (uses root volume instead). 80GB recommended for OpenClaw, 0 for Hermes."
 
   validation {
-    condition     = var.data_volume_size >= 20 && var.data_volume_size <= 500
-    error_message = "Must be between 20 and 500."
+    condition     = var.data_volume_size == 0 || (var.data_volume_size >= 20 && var.data_volume_size <= 500)
+    error_message = "Must be 0 (skip) or between 20 and 500."
   }
 }
 
@@ -139,12 +139,6 @@ variable "provider_api_key" {
   default     = ""
   sensitive   = true
   description = "Direct API key from your AI provider (e.g. Anthropic). Only needed when Model Access Mode is 'api-key'."
-}
-
-variable "bootstrap_script_url" {
-  type        = string
-  default     = "https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/openclaw-bootstrap.sh"
-  description = "URL to the EC2 bootstrap script. Uses the official script by default. Override only for custom installations."
 }
 
 variable "request_quota_increases" {

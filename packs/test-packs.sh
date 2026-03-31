@@ -65,7 +65,7 @@ if [[ -f "${COMMON}" ]]; then
   fi
 
   # Verify required functions are exported
-  for fn in log ok fail warn step parse_args require_cmd write_done_marker pack_banner; do
+  for fn in log ok fail warn step require_cmd write_done_marker pack_banner; do
     if bash -c "source '${COMMON}'; declare -f ${fn} >/dev/null" 2>/dev/null; then
       pass "common.sh: function '${fn}' defined"
     else

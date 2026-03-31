@@ -30,7 +30,7 @@ output "role_arn" {
 
 output "ssm_connect" {
   description = "Connect via SSM Session Manager"
-  value       = "aws ssm start-session --target ${aws_instance.main.id} --region us-east-1"
+  value       = "aws ssm start-session --target ${aws_instance.main.id} --region ${data.aws_region.current.name}"
 }
 
 output "pack_name" {

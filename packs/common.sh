@@ -22,32 +22,6 @@ step() {
   printf "${_CLR_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n\n"
 }
 
-# parse_args KEY VALUE... pairs from "$@"
-# Sets variables named after keys (dashes replaced with underscores, uppercased)
-# Example: parse_args "$@"  with args "--region us-east-1 --port 8090"
-#          sets PACK_ARG_REGION=us-east-1 PACK_ARG_PORT=8090
-parse_args() {
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --*)
-        local key="${1#--}"
-        key="${key//-/_}"
-        key="$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')"
-        if [[ $# -gt 1 ]] && [[ "$2" != --* ]]; then
-          eval "PACK_ARG_${key}=\"\$2\""
-          shift 2
-        else
-          eval "PACK_ARG_${key}=true"
-          shift 1
-        fi
-        ;;
-      *)
-        shift
-        ;;
-    esac
-  done
-}
-
 # require_cmd CMD [CMD...]  — fail if any command is not found
 require_cmd() {
   for cmd in "$@"; do

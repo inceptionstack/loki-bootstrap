@@ -164,13 +164,14 @@ if [[ ! -f "${SERVICE_TPL}" ]]; then
 fi
 
 export NODE_BIN OC_MAIN GW_PORT GW_TOKEN NODE_PREFIX OC_VERSION
+export USER_HOME="${HOME}"
 envsubst < "${SERVICE_TPL}" > "${HOME}/.config/systemd/user/openclaw-gateway.service"
 ok "Service unit written"
 
 # ── Enable and start service ──────────────────────────────────────────────────
 step "Starting gateway service"
 
-# Enable linger so user services survive logout
+# Enable linger (may already be done by dispatcher, but safe to repeat)
 loginctl enable-linger "$(id -un)" 2>/dev/null || true
 
 XDG_RUNTIME_DIR="/run/user/$(id -u)"

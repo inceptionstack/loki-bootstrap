@@ -176,7 +176,7 @@ systemctl is-active amazon-ssm-agent >/dev/null 2>&1 && ok "SSM agent running" |
 (
   while [ ! -f /tmp/loki-bootstrap-done ]; do
     aws ssm put-parameter --name "/loki/setup-log" \
-      --value "$(tail -100 "${LOGFILE}")" \
+      --value "$(tail -c 4000 "${LOGFILE}")" \
       --type String --overwrite --region "${REGION}" >/dev/null 2>&1 || true
     aws ssm put-parameter --name "/loki/setup-status" \
       --value "IN_PROGRESS" \
@@ -184,7 +184,7 @@ systemctl is-active amazon-ssm-agent >/dev/null 2>&1 && ok "SSM agent running" |
     sleep 30
   done
   aws ssm put-parameter --name "/loki/setup-log" \
-    --value "$(tail -200 "${LOGFILE}")" \
+    --value "$(tail -c 4000 "${LOGFILE}")" \
     --type String --overwrite --region "${REGION}" >/dev/null 2>&1 || true
   aws ssm put-parameter --name "/loki/setup-status" \
     --value "COMPLETE" \
@@ -292,6 +292,11 @@ mkdir -p "${HOME}/.openclaw/workspace"
 chmod 700 "${HOME}/.openclaw/workspace"
 ok "Workspace ready"
 SYMLINK_EOF
+
+# ---- Enable linger for ec2-user (allows user systemd services to survive logout) ----
+step "Enable Linger"
+loginctl enable-linger ec2-user
+ok "Linger enabled for ec2-user"
 
 # ── Phase 2: PACKS ────────────────────────────────────────────────────────────
 step "Phase 2: Pack Dispatch"

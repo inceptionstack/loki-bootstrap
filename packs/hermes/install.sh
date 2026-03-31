@@ -52,7 +52,7 @@ while [[ $# -gt 0 ]]; do
     --region)           PACK_ARG_REGION="$2";           shift 2 ;;
     --hermes-model)     PACK_ARG_MODEL="$2";             shift 2 ;;
     --bedrockify-port)  PACK_ARG_BEDROCKIFY_PORT="$2";  shift 2 ;;
-    --model)            shift 2 ;;  # Ignore generic --model (Bedrock ID); use --hermes-model
+    --model)            [[ $# -gt 1 ]] && shift 2 || shift ;;  # Ignore generic --model (Bedrock ID); use --hermes-model
     *) warn "Unknown argument: $1"; shift ;;
   esac
 done

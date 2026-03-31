@@ -867,7 +867,7 @@ wait_for_bootstrap() {
     local cmd_id
     cmd_id=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
       --document-name AWS-RunShellScript \
-      --parameters 'commands=["test -f /tmp/openclaw-setup-done && echo READY || echo WAITING"]' \
+      --parameters 'commands=["test -f /tmp/loki-bootstrap-done && echo READY || echo WAITING"]' \
       --region "$DEPLOY_REGION" --output text --query 'Command.CommandId' 2>/dev/null || echo "")
 
     if [[ -n "$cmd_id" ]]; then

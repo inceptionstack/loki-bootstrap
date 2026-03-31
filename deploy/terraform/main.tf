@@ -642,6 +642,7 @@ resource "aws_instance" "main" {
 }
 
 resource "aws_ebs_volume" "data" {
+  count             = var.data_volume_size > 0 ? 1 : 0
   availability_zone = data.aws_availability_zones.available.names[0]
   size              = var.data_volume_size
   type              = "gp3"
@@ -653,7 +654,8 @@ resource "aws_ebs_volume" "data" {
 }
 
 resource "aws_volume_attachment" "data" {
+  count       = var.data_volume_size > 0 ? 1 : 0
   device_name = "/dev/sdb"
-  volume_id   = aws_ebs_volume.data.id
+  volume_id   = aws_ebs_volume.data[0].id
   instance_id = aws_instance.main.id
 }
