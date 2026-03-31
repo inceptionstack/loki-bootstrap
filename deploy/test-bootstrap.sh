@@ -97,37 +97,68 @@ else
 fi
 echo ""
 
-# ── Test 5: Arg forwarding accumulates EXTRA_ARGS ─────────────────────────────
-info "Test 5: Extra args don't cause parsing errors (sourced parse test)"
+# ── Test 5: Arg parsing writes pack config JSON ───────────────────────────────
+info "Test 5: Pack-specific args are parsed and config JSON is written"
 ARGPARSE_SCRIPT=$(mktemp /tmp/test-argparse-XXXXXX.sh)
 cat > "$ARGPARSE_SCRIPT" << 'ARGPARSE_EOF'
 #!/bin/bash
 set -euo pipefail
 PACK_NAME=""
 REGION="us-east-1"
-EXTRA_ARGS=()
 STACK_NAME=""
+MODEL=""
+GW_PORT=""
+MODEL_MODE=""
+BEDROCKIFY_PORT=""
+HERMES_MODEL=""
+LITELLM_URL=""
+LITELLM_KEY=""
+LITELLM_MODEL=""
+PROVIDER_KEY=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) ;;
-    --pack)    PACK_NAME="$2"; shift 2 ;;
-    --region)  REGION="$2"; EXTRA_ARGS+=("--region" "$2"); shift 2 ;;
-    --*)
-      if [[ $# -gt 1 ]] && [[ "$2" != --* ]]; then
-        EXTRA_ARGS+=("$1" "$2"); shift 2
-      else
-        EXTRA_ARGS+=("$1"); shift
-      fi
-      ;;
+    --pack)            PACK_NAME="$2";    shift 2 ;;
+    --region)          REGION="$2";       shift 2 ;;
+    --model)           MODEL="$2";        shift 2 ;;
+    --gw-port)         GW_PORT="$2";      shift 2 ;;
+    --model-mode)      MODEL_MODE="$2";   shift 2 ;;
+    --bedrockify-port) BEDROCKIFY_PORT="$2"; shift 2 ;;
+    --hermes-model)    HERMES_MODEL="$2"; shift 2 ;;
+    --litellm-base-url|--litellm-url)     LITELLM_URL="$2"; shift 2 ;;
+    --litellm-api-key|--litellm-key)      LITELLM_KEY="$2"; shift 2 ;;
+    --litellm-model)   LITELLM_MODEL="$2"; shift 2 ;;
+    --provider-api-key|--provider-key)    PROVIDER_KEY="$2"; shift 2 ;;
+    --*) [[ $# -gt 1 ]] && [[ "$2" != --* ]] && shift 2 || shift ;;
     *) shift ;;
   esac
 done
+
+TMPCONFIG="$(mktemp /tmp/test-pack-config-XXXXXX.json)"
+cat > "${TMPCONFIG}" << JSON
+{
+  "pack": "${PACK_NAME}",
+  "region": "${REGION}",
+  "model": "${MODEL}",
+  "gw_port": "${GW_PORT}",
+  "model_mode": "${MODEL_MODE}"
+}
+JSON
+
 echo "PACK=${PACK_NAME}"
 echo "REGION=${REGION}"
-echo "EXTRA_ARGS_COUNT=${#EXTRA_ARGS[@]}"
+echo "MODEL=${MODEL}"
+echo "GW_PORT=${GW_PORT}"
+echo "CONFIG_EXISTS=$([ -f "${TMPCONFIG}" ] && echo yes || echo no)"
+if command -v jq &>/dev/null; then
+  echo "CONFIG_REGION=$(jq -r '.region' "${TMPCONFIG}")"
+  echo "CONFIG_MODEL=$(jq -r '.model' "${TMPCONFIG}")"
+fi
+rm -f "${TMPCONFIG}"
 ARGPARSE_EOF
-PARSE_TEST=$(bash "$ARGPARSE_SCRIPT" --pack openclaw --region eu-west-1 --model some-model --port 3001 2>&1)
+
+PARSE_TEST=$(bash "$ARGPARSE_SCRIPT" --pack openclaw --region eu-west-1 --model some-model --gw-port 3001 2>&1)
 rm -f "$ARGPARSE_SCRIPT"
 
 if echo "$PARSE_TEST" | grep -q "PACK=openclaw"; then
@@ -140,10 +171,30 @@ if echo "$PARSE_TEST" | grep -q "REGION=eu-west-1"; then
 else
   fail "Arg parse: --region not captured — got: $PARSE_TEST"
 fi
-if echo "$PARSE_TEST" | grep -q "EXTRA_ARGS_COUNT=6"; then
-  ok "Arg parse: EXTRA_ARGS contains 6 elements (region + model + port)"
+if echo "$PARSE_TEST" | grep -q "MODEL=some-model"; then
+  ok "Arg parse: --model value captured correctly"
 else
-  fail "Arg parse: EXTRA_ARGS count unexpected — got: $PARSE_TEST"
+  fail "Arg parse: --model not captured — got: $PARSE_TEST"
+fi
+if echo "$PARSE_TEST" | grep -q "GW_PORT=3001"; then
+  ok "Arg parse: --gw-port value captured correctly"
+else
+  fail "Arg parse: --gw-port not captured — got: $PARSE_TEST"
+fi
+if echo "$PARSE_TEST" | grep -q "CONFIG_EXISTS=yes"; then
+  ok "Arg parse: config JSON was written"
+else
+  fail "Arg parse: config JSON not written — got: $PARSE_TEST"
+fi
+if echo "$PARSE_TEST" | grep -q "CONFIG_REGION=eu-west-1"; then
+  ok "Arg parse: config JSON contains correct region"
+else
+  info "  jq not available or CONFIG_REGION check skipped — got: $PARSE_TEST"
+fi
+if echo "$PARSE_TEST" | grep -q "CONFIG_MODEL=some-model"; then
+  ok "Arg parse: config JSON contains correct model"
+else
+  info "  jq not available or CONFIG_MODEL check skipped — got: $PARSE_TEST"
 fi
 echo ""
 

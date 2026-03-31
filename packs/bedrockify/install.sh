@@ -19,10 +19,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../common.sh"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-PACK_ARG_REGION="us-east-1"
-PACK_ARG_PORT="8090"
-PACK_ARG_MODEL="us.anthropic.claude-opus-4-6-v1"
-PACK_ARG_EMBED_MODEL="amazon.titan-embed-text-v2:0"
+# Defaults from config file (written by bootstrap dispatcher), then CLI overrides
+PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
+PACK_ARG_PORT="$(pack_config_get bedrockify_port "8090")"
+PACK_ARG_MODEL="$(pack_config_get model "us.anthropic.claude-opus-4-6-v1")"
+PACK_ARG_EMBED_MODEL="$(pack_config_get embed_model "amazon.titan-embed-text-v2:0")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 usage() {

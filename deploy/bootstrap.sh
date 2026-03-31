@@ -63,10 +63,18 @@ EOF
 # ── Arg parsing ───────────────────────────────────────────────────────────────
 PACK_NAME=""
 REGION="${REGION:-us-east-1}"
-EXTRA_ARGS=()
 STACK_NAME="${STACK_NAME:-}"
+# Pack-specific args (written to JSON config)
+MODEL=""
+GW_PORT=""
+MODEL_MODE=""
+BEDROCKIFY_PORT=""
+HERMES_MODEL=""
+LITELLM_URL=""
+LITELLM_KEY=""
+LITELLM_MODEL=""
+PROVIDER_KEY=""
 
-# First pass: extract --pack / --region / --help; collect everything else
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)
@@ -81,16 +89,58 @@ while [[ $# -gt 0 ]]; do
     --region)
       [[ $# -gt 1 ]] || { echo "ERROR: --region requires a value" >&2; exit 1; }
       REGION="$2"
-      EXTRA_ARGS+=("--region" "$2")
+      shift 2
+      ;;
+    --model)
+      [[ $# -gt 1 ]] || { echo "ERROR: --model requires a value" >&2; exit 1; }
+      MODEL="$2"
+      shift 2
+      ;;
+    --gw-port)
+      [[ $# -gt 1 ]] || { echo "ERROR: --gw-port requires a value" >&2; exit 1; }
+      GW_PORT="$2"
+      shift 2
+      ;;
+    --model-mode)
+      [[ $# -gt 1 ]] || { echo "ERROR: --model-mode requires a value" >&2; exit 1; }
+      MODEL_MODE="$2"
+      shift 2
+      ;;
+    --bedrockify-port)
+      [[ $# -gt 1 ]] || { echo "ERROR: --bedrockify-port requires a value" >&2; exit 1; }
+      BEDROCKIFY_PORT="$2"
+      shift 2
+      ;;
+    --hermes-model)
+      [[ $# -gt 1 ]] || { echo "ERROR: --hermes-model requires a value" >&2; exit 1; }
+      HERMES_MODEL="$2"
+      shift 2
+      ;;
+    --litellm-base-url|--litellm-url)
+      [[ $# -gt 1 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
+      LITELLM_URL="$2"
+      shift 2
+      ;;
+    --litellm-api-key|--litellm-key)
+      [[ $# -gt 1 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
+      LITELLM_KEY="$2"
+      shift 2
+      ;;
+    --litellm-model)
+      [[ $# -gt 1 ]] || { echo "ERROR: --litellm-model requires a value" >&2; exit 1; }
+      LITELLM_MODEL="$2"
+      shift 2
+      ;;
+    --provider-api-key|--provider-key)
+      [[ $# -gt 1 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
+      PROVIDER_KEY="$2"
       shift 2
       ;;
     --*)
-      # Forward all other --key [value] pairs to pack install scripts
+      # Skip unknown options (with optional value)
       if [[ $# -gt 1 ]] && [[ "$2" != --* ]]; then
-        EXTRA_ARGS+=("$1" "$2")
         shift 2
       else
-        EXTRA_ARGS+=("$1")
         shift
       fi
       ;;
@@ -106,6 +156,26 @@ if [[ -z "$PACK_NAME" ]]; then
   usage
   exit 1
 fi
+
+# ── Write pack config JSON ────────────────────────────────────────────────────
+PACK_CONFIG="/tmp/loki-pack-config.json"
+cat > "${PACK_CONFIG}" << JSON
+{
+  "pack": "${PACK_NAME}",
+  "region": "${REGION}",
+  "model": "${MODEL}",
+  "gw_port": "${GW_PORT}",
+  "model_mode": "${MODEL_MODE}",
+  "bedrockify_port": "${BEDROCKIFY_PORT}",
+  "hermes_model": "${HERMES_MODEL}",
+  "litellm_url": "${LITELLM_URL}",
+  "litellm_key": "${LITELLM_KEY}",
+  "litellm_model": "${LITELLM_MODEL}",
+  "provider_key": "${PROVIDER_KEY}"
+}
+JSON
+chmod 600 "${PACK_CONFIG}"
+export PACK_CONFIG
 
 # ── Locate repo root ──────────────────────────────────────────────────────────
 # bootstrap.sh lives in deploy/, one level above repo root
@@ -238,7 +308,7 @@ fi
 
 # ---- mise + Node.js (as ec2-user) ----
 step "mise + Node.js"
-export PACK_NAME REGION EXTRA_ARGS_STR
+export PACK_NAME REGION
 # shellcheck disable=SC2016
 sudo -u ec2-user bash << 'MISE_EOF'
 set -euo pipefail
@@ -331,14 +401,14 @@ for dep in "${DEPS[@]}"; do
     exit 1
   fi
   info "Installing dependency: ${dep}"
-  # Run as ec2-user with mise/node on PATH, forwarding all extra args
-  sudo -u ec2-user bash -c '
+  # Run as ec2-user with mise/node on PATH; PACK_CONFIG is auto-detected by packs
+  sudo -u ec2-user --preserve-env=PACK_CONFIG bash -c '
     export PATH="/home/ec2-user/.local/bin:$PATH"
     eval "$(/home/ec2-user/.local/bin/mise activate bash 2>/dev/null)" 2>/dev/null || true
     NODE_PREFIX=$(npm prefix -g 2>/dev/null || true)
     [ -n "$NODE_PREFIX" ] && export PATH="${NODE_PREFIX}/bin:$PATH"
     bash "$@"
-  ' -- "${DEP_INSTALL}" "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}" || {
+  ' -- "${DEP_INSTALL}" || {
     fail "Dependency pack '${dep}' install failed"
     exit 1
   }
@@ -352,13 +422,13 @@ if [[ ! -f "$PACK_INSTALL" ]]; then
   exit 1
 fi
 info "Installing pack: ${PACK_NAME}"
-sudo -u ec2-user bash -c '
+sudo -u ec2-user --preserve-env=PACK_CONFIG bash -c '
   export PATH="/home/ec2-user/.local/bin:$PATH"
   eval "$(/home/ec2-user/.local/bin/mise activate bash 2>/dev/null)" 2>/dev/null || true
   NODE_PREFIX=$(npm prefix -g 2>/dev/null || true)
   [ -n "$NODE_PREFIX" ] && export PATH="${NODE_PREFIX}/bin:$PATH"
   bash "$@"
-' -- "${PACK_INSTALL}" "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}" || {
+' -- "${PACK_INSTALL}" || {
   fail "Pack '${PACK_NAME}' install failed"
   exit 1
 }

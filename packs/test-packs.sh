@@ -65,13 +65,77 @@ if [[ -f "${COMMON}" ]]; then
   fi
 
   # Verify required functions are exported
-  for fn in log ok fail warn step require_cmd write_done_marker pack_banner; do
+  for fn in log ok fail warn step require_cmd write_done_marker pack_banner pack_config_get; do
     if bash -c "source '${COMMON}'; declare -f ${fn} >/dev/null" 2>/dev/null; then
       pass "common.sh: function '${fn}' defined"
     else
       fail "common.sh: function '${fn}' missing"
     fi
   done
+fi
+
+# ── Test: pack_config_get ─────────────────────────────────────────────────────
+header "Test: pack_config_get"
+
+if command -v jq &>/dev/null; then
+  # Create a temp config JSON for testing
+  TMPCONFIG="$(mktemp /tmp/test-pack-config-XXXXXX.json)"
+  cat > "${TMPCONFIG}" << 'JSONEOF'
+{
+  "region": "eu-west-2",
+  "model": "us.anthropic.claude-sonnet-4-6",
+  "gw_port": "4000",
+  "hermes_model": "anthropic/claude-sonnet-4.6"
+}
+JSONEOF
+
+  # Test: reads an existing key
+  _val=$(PACK_CONFIG="${TMPCONFIG}" bash -c "source '${COMMON}'; pack_config_get region 'us-east-1'")
+  if [[ "${_val}" == "eu-west-2" ]]; then
+    pass "pack_config_get: reads value from JSON file"
+  else
+    fail "pack_config_get: expected 'eu-west-2', got '${_val}'"
+  fi
+
+  # Test: reads a different key
+  _val=$(PACK_CONFIG="${TMPCONFIG}" bash -c "source '${COMMON}'; pack_config_get hermes_model 'default-model'")
+  if [[ "${_val}" == "anthropic/claude-sonnet-4.6" ]]; then
+    pass "pack_config_get: reads hermes_model key correctly"
+  else
+    fail "pack_config_get: expected 'anthropic/claude-sonnet-4.6', got '${_val}'"
+  fi
+
+  # Test: returns default when key is missing from JSON
+  _val=$(PACK_CONFIG="${TMPCONFIG}" bash -c "source '${COMMON}'; pack_config_get nonexistent_key 'my-default'")
+  if [[ "${_val}" == "my-default" ]]; then
+    pass "pack_config_get: returns default for missing key"
+  else
+    fail "pack_config_get: expected 'my-default', got '${_val}'"
+  fi
+
+  # Test: returns default when config file does not exist
+  _val=$(PACK_CONFIG="/tmp/no-such-file-XYZ.json" bash -c "source '${COMMON}'; pack_config_get region 'fallback-region'")
+  if [[ "${_val}" == "fallback-region" ]]; then
+    pass "pack_config_get: returns default when config file missing"
+  else
+    fail "pack_config_get: expected 'fallback-region', got '${_val}'"
+  fi
+
+  # Test: returns default when PACK_CONFIG unset and /tmp/loki-pack-config.json absent
+  _val=$(env -u PACK_CONFIG bash -c "
+    [[ ! -f /tmp/loki-pack-config.json ]] || { echo skip; exit 0; }
+    source '${COMMON}'
+    pack_config_get region 'default-region'
+  ")
+  if [[ "${_val}" == "default-region" ]] || [[ "${_val}" == "skip" ]]; then
+    pass "pack_config_get: falls back to default when env unset and file absent"
+  else
+    fail "pack_config_get: unexpected value '${_val}' (expected default)"
+  fi
+
+  rm -f "${TMPCONFIG}"
+else
+  skip "pack_config_get tests: jq not installed"
 fi
 
 # ── Test: registry.yaml ───────────────────────────────────────────────────────

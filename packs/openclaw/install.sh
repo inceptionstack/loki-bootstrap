@@ -21,15 +21,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../common.sh"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-PACK_ARG_REGION="us-east-1"
-PACK_ARG_MODEL="us.anthropic.claude-opus-4-6-v1"
-PACK_ARG_PORT="3001"
-PACK_ARG_TOKEN=""
-PACK_ARG_MODEL_MODE="bedrock"
-PACK_ARG_LITELLM_URL=""
-PACK_ARG_LITELLM_KEY=""
-PACK_ARG_LITELLM_MODEL="claude-opus-4-6"
-PACK_ARG_PROVIDER_KEY=""
+# Defaults from config file (written by bootstrap dispatcher), then CLI overrides
+PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
+PACK_ARG_MODEL="$(pack_config_get model "us.anthropic.claude-opus-4-6-v1")"
+PACK_ARG_PORT="$(pack_config_get gw_port "3001")"
+PACK_ARG_TOKEN="$(pack_config_get gw_token "")"
+PACK_ARG_MODEL_MODE="$(pack_config_get model_mode "bedrock")"
+PACK_ARG_LITELLM_URL="$(pack_config_get litellm_url "")"
+PACK_ARG_LITELLM_KEY="$(pack_config_get litellm_key "")"
+PACK_ARG_LITELLM_MODEL="$(pack_config_get litellm_model "claude-opus-4-6")"
+PACK_ARG_PROVIDER_KEY="$(pack_config_get provider_key "")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 usage() {

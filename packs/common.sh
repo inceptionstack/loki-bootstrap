@@ -38,6 +38,22 @@ write_done_marker() {
   ok "Marker written: /tmp/pack-${pack_name}-done"
 }
 
+# Read a value from the pack config JSON file
+# Usage: pack_config_get "key" "default_value"
+pack_config_get() {
+  local key="$1" default="${2:-}"
+  local config="${PACK_CONFIG:-/tmp/loki-pack-config.json}"
+  if [[ -f "$config" ]] && command -v jq &>/dev/null; then
+    local val
+    val=$(jq -r --arg k "$key" '.[$k] // empty' "$config" 2>/dev/null)
+    if [[ -n "$val" ]]; then
+      echo "$val"
+      return
+    fi
+  fi
+  echo "$default"
+}
+
 # pack_banner NAME ACTION
 pack_banner() {
   local name="$1"

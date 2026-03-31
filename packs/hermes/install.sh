@@ -19,9 +19,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../common.sh"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-PACK_ARG_REGION="us-east-1"
-PACK_ARG_MODEL="anthropic/claude-opus-4.6"
-PACK_ARG_BEDROCKIFY_PORT="8090"
+# Defaults from config file (written by bootstrap dispatcher), then CLI overrides
+# Note: reads "hermes_model" key (not "model") — hermes needs OpenAI-style model ID
+PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
+PACK_ARG_MODEL="$(pack_config_get hermes_model "anthropic/claude-opus-4.6")"
+PACK_ARG_BEDROCKIFY_PORT="$(pack_config_get bedrockify_port "8090")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 usage() {
