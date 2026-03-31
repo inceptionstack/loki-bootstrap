@@ -11,6 +11,7 @@ Metadata:
           default: "🔧 Basic Configuration"
         Parameters:
           - EnvironmentName
+          - PackName
           - InstanceType
           - DefaultModel
       - Label:
@@ -96,6 +97,8 @@ Metadata:
         default: "Gateway Port"
       BootstrapScriptUrl:
         default: "Bootstrap Script URL"
+      PackName:
+        default: "Agent Pack"
       LokiWatermark:
         default: "Loki Watermark Tag"
 
@@ -103,6 +106,14 @@ Metadata:
 # PARAMETERS
 # ============================================================================
 Parameters:
+  PackName:
+    Type: String
+    Default: openclaw
+    AllowedValues:
+      - openclaw
+      - hermes
+    Description: "Agent pack to deploy. 'openclaw' is the stateful AI agent with 24/7 gateway (recommended). 'hermes' is the NousResearch CLI agent (lighter, t4g.medium sufficient)."
+
   EnvironmentName:
     Type: String
     Default: openclaw
@@ -296,6 +307,8 @@ Resources:
           Value: !Ref LokiWatermark
         - Key: loki:deploy-method
           Value: sam
+        - Key: loki:pack
+          Value: !Ref PackName
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -897,10 +910,19 @@ Resources:
           export LITELLM_API_KEY="${LiteLLMApiKey}"
           export LITELLM_MODEL="${LiteLLMModel}"
           export PROVIDER_API_KEY="${ProviderApiKey}"
-          # Download and run bootstrap from S3
-          curl -sfL ${BootstrapScriptUrl} -o /tmp/openclaw-bootstrap.sh
-          chmod +x /tmp/openclaw-bootstrap.sh
-          bash /tmp/openclaw-bootstrap.sh
+          export PACK_NAME="${PackName}"
+          # Clone repo and run bootstrap
+          git clone --depth 1 https://github.com/inceptionstack/loki-agent.git /tmp/loki-agent
+          bash /tmp/loki-agent/deploy/bootstrap.sh \
+            --pack $PACK_NAME \
+            --region $BEDROCK_REGION \
+            --model $DEFAULT_MODEL \
+            --gw-port $GW_PORT \
+            --model-mode $MODEL_MODE \
+            --litellm-base-url "$LITELLM_BASE_URL" \
+            --litellm-api-key "$LITELLM_API_KEY" \
+            --litellm-model $LITELLM_MODEL \
+            --provider-api-key "$PROVIDER_API_KEY"
 # ============================================================================
 # OUTPUTS
 # ============================================================================
@@ -932,3 +954,7 @@ Outputs:
   SSMConnect:
     Description: Connect via SSM Session Manager
     Value: !Sub 'aws ssm start-session --target ${Instance} --region ${AWS::Region}'
+
+  PackName:
+    Description: "Deployed agent pack"
+    Value: !Ref PackName

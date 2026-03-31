@@ -32,3 +32,8 @@ output "ssm_connect" {
   description = "Connect via SSM Session Manager"
   value       = "aws ssm start-session --target ${aws_instance.main.id} --region us-east-1"
 }
+
+output "pack_name" {
+  description = "Deployed agent pack"
+  value       = var.pack_name
+}

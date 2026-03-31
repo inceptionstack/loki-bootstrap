@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# packs/common.sh — shared helpers for all pack install scripts
+# Source this file; do not execute directly.
+# Usage: source "$(dirname "$0")/../common.sh"
+
+# Colors
+_CLR_GREEN='\033[0;32m'
+_CLR_CYAN='\033[0;36m'
+_CLR_RED='\033[0;31m'
+_CLR_YELLOW='\033[0;33m'
+_CLR_BOLD='\033[1m'
+_CLR_NC='\033[0m'
+
+# log LEVEL MESSAGE
+log()  { printf "${_CLR_CYAN}→${_CLR_NC} %s\n" "$1"; }
+ok()   { printf "${_CLR_GREEN}✓${_CLR_NC} %s\n" "$1"; }
+fail() { printf "${_CLR_RED}✗${_CLR_NC} %s\n" "$1" >&2; exit 1; }
+warn() { printf "${_CLR_YELLOW}⚠${_CLR_NC} %s\n" "$1"; }
+step() {
+  printf "\n${_CLR_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n"
+  printf "${_CLR_BOLD}  %s${_CLR_NC}\n" "$1"
+  printf "${_CLR_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n\n"
+}
+
+# parse_args KEY VALUE... pairs from "$@"
+# Sets variables named after keys (dashes replaced with underscores, uppercased)
+# Example: parse_args "$@"  with args "--region us-east-1 --port 8090"
+#          sets PACK_ARG_REGION=us-east-1 PACK_ARG_PORT=8090
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --*)
+        local key="${1#--}"
+        key="${key//-/_}"
+        key="$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')"
+        if [[ $# -gt 1 ]] && [[ "$2" != --* ]]; then
+          eval "PACK_ARG_${key}=\"\$2\""
+          shift 2
+        else
+          eval "PACK_ARG_${key}=true"
+          shift 1
+        fi
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+}
+
+# require_cmd CMD [CMD...]  — fail if any command is not found
+require_cmd() {
+  for cmd in "$@"; do
+    if ! command -v "$cmd" &>/dev/null; then
+      fail "Required command not found: $cmd (prerequisites not met)"
+    fi
+  done
+}
+
+# write_done_marker PACK_NAME
+write_done_marker() {
+  local pack_name="$1"
+  touch "/tmp/pack-${pack_name}-done"
+  ok "Marker written: /tmp/pack-${pack_name}-done"
+}
+
+# pack_banner NAME ACTION
+pack_banner() {
+  local name="$1"
+  local action="${2:-INSTALLING}"
+  printf "\n${_CLR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n"
+  printf "${_CLR_CYAN}  [PACK:%s] %s${_CLR_NC}\n" "$name" "$action"
+  printf "${_CLR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n\n"
+}

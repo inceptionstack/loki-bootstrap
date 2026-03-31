@@ -333,8 +333,29 @@ collect_config() {
   echo "    2) t4g.large   -- 2 vCPU, 8GB  (~\$50/mo)  regular use"
   echo "    3) t4g.xlarge  -- 4 vCPU, 16GB (~\$100/mo) recommended"
   echo ""
+
+  # ---- Pack selection -------------------------------------------------------
+  echo "  Agent to deploy:"
+  echo "    1) OpenClaw  -- stateful AI agent with 24/7 gateway (recommended)"
+  echo "    2) Hermes    -- NousResearch CLI agent (lighter)"
+  echo ""
+  local pack_choice
+  prompt "Deploy which agent" pack_choice "1"
+  case "$pack_choice" in
+    2) PACK_NAME="hermes" ;;
+    *) PACK_NAME="openclaw" ;;
+  esac
+  ok "Selected pack: ${PACK_NAME}"
+
+  # Adjust instance size default based on pack
+  local default_size_choice="3"  # openclaw → t4g.xlarge
+  if [[ "$PACK_NAME" == "hermes" ]]; then
+    default_size_choice="1"      # hermes → t4g.medium
+    info "Hermes is lightweight — defaulting to t4g.medium"
+  fi
+  echo ""
   local choice
-  prompt "Instance size" choice "3"
+  prompt "Instance size" choice "$default_size_choice"
   case "$choice" in
     1) INSTANCE_TYPE="t4g.medium" ;;
     2) INSTANCE_TYPE="t4g.large" ;;
@@ -380,14 +401,15 @@ collect_security_config() {
 # Parameter source-of-truth: single mapping for CFN Console, CFN CLI, Terraform
 # ============================================================================
 # ⚠ KEEP THESE THREE ARRAYS IN SYNC — same order, same count
-PARAM_CFN_NAMES=(EnvironmentName InstanceType ModelMode BedrockRegion LokiWatermark EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder)
-PARAM_TF_NAMES=(environment_name instance_type model_mode bedrock_region loki_watermark enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder)
+PARAM_CFN_NAMES=(EnvironmentName PackName InstanceType ModelMode BedrockRegion LokiWatermark EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder)
+PARAM_TF_NAMES=(environment_name pack_name instance_type model_mode bedrock_region loki_watermark enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder)
 PARAM_VALUES=()  # populated by build_deploy_params()
 
 # Populate PARAM_VALUES from user config (call after collect_config)
 build_deploy_params() {
   PARAM_VALUES=(
     "$ENV_NAME"
+    "$PACK_NAME"
     "$INSTANCE_TYPE"
     "bedrock"
     "$DEPLOY_REGION"
@@ -439,6 +461,7 @@ show_summary() {
   echo ""
   echo -e "  ${BOLD}╭─────────────── Deploy Summary ───────────────╮${NC}"
   echo -e "  ${BOLD}│${NC}  Environment:  ${ENV_NAME}"
+  echo -e "  ${BOLD}│${NC}  Pack:         ${PACK_NAME}"
   echo -e "  ${BOLD}│${NC}  Instance:     ${INSTANCE_TYPE}"
   echo -e "  ${BOLD}│${NC}  Region:       ${DEPLOY_REGION}"
   echo -e "  ${BOLD}│${NC}  Watermark:    ${LOKI_WATERMARK}"
@@ -627,6 +650,7 @@ TF_STATE_BUCKET=""
 TF_STATE_KEY=""
 TF_LOCK_TABLE=""
 TF_WORKDIR=""  # Set if Terraform work is moved to /tmp (CloudShell low-disk)
+PACK_NAME="openclaw"  # Default pack; overridden by collect_config
 
 # ============================================================================
 # Deploy: Terraform (option 4)

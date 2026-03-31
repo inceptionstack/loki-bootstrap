@@ -1,3 +1,13 @@
+variable "pack_name" {
+  description = "Agent pack to deploy (openclaw or hermes)"
+  type        = string
+  default     = "openclaw"
+  validation {
+    condition     = contains(["openclaw", "hermes"], var.pack_name)
+    error_message = "pack_name must be openclaw or hermes."
+  }
+}
+
 variable "environment_name" {
   type        = string
   default     = "openclaw"

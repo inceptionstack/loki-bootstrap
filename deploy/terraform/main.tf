@@ -15,6 +15,7 @@ locals {
     "loki:watermark"     = var.loki_watermark
     "loki:deploy-method" = "terraform"
     "loki:version"       = "1.0"
+    "loki:pack"          = var.pack_name
   }
 }
 
@@ -618,6 +619,7 @@ resource "aws_instance" "main" {
     acct_id          = data.aws_caller_identity.current.account_id
     region           = data.aws_region.current.name
     environment_name = var.environment_name
+    pack_name        = var.pack_name
     default_model    = var.default_model
     bedrock_region   = var.bedrock_region
     gw_port          = var.openclaw_gateway_port

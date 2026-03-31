@@ -10,7 +10,16 @@ export LITELLM_BASE_URL="${litellm_base_url}"
 export LITELLM_API_KEY="${litellm_api_key}"
 export LITELLM_MODEL="${litellm_model}"
 export PROVIDER_API_KEY="${provider_api_key}"
-# Download and run bootstrap
-curl -sfL ${bootstrap_url} -o /tmp/openclaw-bootstrap.sh
-chmod +x /tmp/openclaw-bootstrap.sh
-bash /tmp/openclaw-bootstrap.sh
+export PACK_NAME="${pack_name}"
+# Clone repo and run bootstrap
+git clone --depth 1 https://github.com/inceptionstack/loki-agent.git /tmp/loki-agent
+bash /tmp/loki-agent/deploy/bootstrap.sh \
+  --pack $PACK_NAME \
+  --region $BEDROCK_REGION \
+  --model $DEFAULT_MODEL \
+  --gw-port $GW_PORT \
+  --model-mode $MODEL_MODE \
+  --litellm-base-url "$LITELLM_BASE_URL" \
+  --litellm-api-key "$LITELLM_API_KEY" \
+  --litellm-model $LITELLM_MODEL \
+  --provider-api-key "$PROVIDER_API_KEY"
