@@ -1,0 +1,52 @@
+name: Auto-bump minor version
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '*.md'
+      - '.github/**'
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    # Skip if this commit was made by the bot (prevent infinite loop)
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump minor version
+        run: |
+          # Extract current version
+          current=$(grep '^INSTALLER_VERSION=' install.sh | head -1 | cut -d'"' -f2)
+          if [[ -z "$current" ]]; then
+            echo "Could not find INSTALLER_VERSION in install.sh"
+            exit 1
+          fi
+
+          # Parse major.minor.patch
+          IFS='.' read -r major minor patch <<< "$current"
+          patch=$((patch + 1))
+          new_version="${major}.${minor}.${patch}"
+
+          echo "Bumping version: ${current} → ${new_version}"
+
+          # Replace in install.sh
+          sed -i "s/^INSTALLER_VERSION=\"${current}\"/INSTALLER_VERSION=\"${new_version}\"/" install.sh
+
+          # Verify the change took effect
+          grep "INSTALLER_VERSION=\"${new_version}\"" install.sh || {
+            echo "Version replacement failed!"
+            exit 1
+          }
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add install.sh
+          git commit -m "ci: bump version to ${new_version} [skip ci]"
+          git push
