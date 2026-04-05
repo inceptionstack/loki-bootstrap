@@ -636,7 +636,7 @@ resource "aws_iam_role" "admin_setup_lambda" {
 }
 
 resource "aws_iam_role_policy_attachment" "admin_setup_basic" {
-  count      = var.profile_name == "builder" ? 1 : 0
+  count      = var.enable_satellite_services && var.profile_name == "builder" ? 1 : 0
   role       = aws_iam_role.admin_setup_lambda[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
