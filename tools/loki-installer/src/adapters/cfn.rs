@@ -45,6 +45,12 @@ struct DescribeStacksResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct CallerIdentityResponse {
+    #[serde(rename = "Account")]
+    account: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct StackDescription {
     #[serde(rename = "StackStatus")]
     stack_status: String,
@@ -144,6 +150,15 @@ impl DeployAdapter for CfnAdapter {
                             "--output".into(),
                             "json".into(),
                         ],
+                    },
+                },
+                DeployStep {
+                    id: "stage-template".into(),
+                    phase: InstallPhase::PrepareDeployment,
+                    display_name: "Upload CloudFormation template to S3".into(),
+                    action: DeployAction::RunCommand {
+                        program: "aws".into(),
+                        args: vec!["s3".into(), "cp".into()],
                     },
                 },
                 DeployStep {
@@ -257,6 +272,8 @@ async fn apply_cloudformation(
 ) -> Result<ApplyResult, AdapterError> {
     let context = CloudFormationContext::from_plan(plan)?;
     let mut artifacts = BTreeMap::new();
+    let mut account_id: Option<String> = None;
+    let mut template_url: Option<String> = None;
 
     let mut progress = StackProgress {
         operation: None,
@@ -269,24 +286,68 @@ async fn apply_cloudformation(
 
         match step.id.as_str() {
             "validate-environment" => {
-                validate_cloudformation_environment(&context).await?;
+                let aws_account_id = validate_cloudformation_environment(&context).await?;
+                artifacts.insert("aws_account_id".into(), aws_account_id.clone());
+                session
+                    .artifacts
+                    .insert("aws_account_id".into(), aws_account_id.clone());
+                event_sink
+                    .emit(InstallEvent::ArtifactRecorded {
+                        key: "aws_account_id".into(),
+                        value: aws_account_id.clone(),
+                    })
+                    .await;
+                account_id = Some(aws_account_id);
                 event_sink
                     .emit(InstallEvent::LogLine {
                         message: "AWS identity validated".into(),
                     })
                     .await;
             }
+            "stage-template" => {
+                let aws_account_id = account_id.as_deref().ok_or_else(|| {
+                    AdapterError::Message(
+                        "AWS account ID missing before CloudFormation template upload".into(),
+                    )
+                })?;
+                let staged_template =
+                    stage_cloudformation_template(&context, aws_account_id, event_sink).await?;
+                for (key, value) in [
+                    (
+                        "template_bucket".to_string(),
+                        staged_template.bucket.clone(),
+                    ),
+                    ("template_url".to_string(), staged_template.url.clone()),
+                ] {
+                    artifacts.insert(key.clone(), value.clone());
+                    session.artifacts.insert(key.clone(), value.clone());
+                    event_sink
+                        .emit(InstallEvent::ArtifactRecorded { key, value })
+                        .await;
+                }
+                template_url = Some(staged_template.url);
+            }
             "create-stack" => {
                 progress = prepare_stack_progress(&context).await?;
-                progress = run_stack_operation_if_needed(&context, progress, event_sink).await?;
+                progress = run_stack_operation_if_needed(
+                    &context,
+                    template_url.as_deref().ok_or_else(|| {
+                        AdapterError::Message(
+                            "CloudFormation template URL missing before stack operation".into(),
+                        )
+                    })?,
+                    progress,
+                    event_sink,
+                )
+                .await?;
             }
             "wait-stack" => {
-                artifacts = if progress.wait_required {
+                let stack_artifacts = if progress.wait_required {
                     wait_for_stack_completion(&context, progress.waiter, event_sink).await?
                 } else {
                     describe_stack_artifacts(&context).await?
                 };
-                for (key, value) in &artifacts {
+                for (key, value) in &stack_artifacts {
                     event_sink
                         .emit(InstallEvent::ArtifactRecorded {
                             key: key.clone(),
@@ -294,7 +355,8 @@ async fn apply_cloudformation(
                         })
                         .await;
                 }
-                session.artifacts.extend(artifacts.clone());
+                session.artifacts.extend(stack_artifacts.clone());
+                artifacts.extend(stack_artifacts);
             }
             "emit-post-install" => {
                 event_sink
@@ -374,7 +436,7 @@ impl CloudFormationContext {
 
 async fn validate_cloudformation_environment(
     context: &CloudFormationContext,
-) -> Result<(), AdapterError> {
+) -> Result<String, AdapterError> {
     if !Path::new(&context.template_path).exists() {
         return Err(AdapterError::Message(format!(
             "CloudFormation template not found at {} — verify the repo checkout includes deploy/cloudformation/template.yaml",
@@ -384,7 +446,13 @@ async fn validate_cloudformation_environment(
 
     let output = run_command(&build_validate_identity_command(Some(&context.region))).await?;
     if output.success() {
-        return Ok(());
+        let identity: CallerIdentityResponse =
+            serde_json::from_str(&output.stdout).map_err(|source| {
+                AdapterError::Message(format!(
+                    "Failed to parse AWS caller identity JSON — {source}"
+                ))
+            })?;
+        return Ok(identity.account);
     }
 
     Err(map_aws_command_failure(
@@ -446,6 +514,7 @@ async fn prepare_stack_progress(
 
 async fn run_stack_operation_if_needed(
     context: &CloudFormationContext,
+    template_url: &str,
     mut progress: StackProgress,
     event_sink: &mut dyn InstallEventSink,
 ) -> Result<StackProgress, AdapterError> {
@@ -469,7 +538,7 @@ async fn run_stack_operation_if_needed(
         operation,
         stack_name: &context.stack_name,
         region: &context.region,
-        template_path: &context.template_path,
+        template_url,
         capabilities: &context.capabilities,
         pack: &context.pack,
         profile: &context.profile,
@@ -496,6 +565,83 @@ async fn run_stack_operation_if_needed(
         "CloudFormation deployment command failed — inspect the AWS CLI output above for the rejected parameter or permission",
         Some(&context.region),
     ))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StagedTemplate {
+    bucket: String,
+    url: String,
+}
+
+async fn stage_cloudformation_template(
+    context: &CloudFormationContext,
+    account_id: &str,
+    event_sink: &mut dyn InstallEventSink,
+) -> Result<StagedTemplate, AdapterError> {
+    let bucket = format!("loki-deploy-{account_id}");
+    let object_key = format!("loki-installer/{}/template.yaml", context.stack_name);
+    let template_url = format!("https://s3.amazonaws.com/{bucket}/{object_key}");
+
+    let create_bucket = run_command(&build_create_bucket_command(&bucket, &context.region)).await?;
+    if !create_bucket.success() && !bucket_already_owned(&create_bucket.stderr) {
+        return Err(map_aws_command_failure(
+            &create_bucket,
+            "Failed to create CloudFormation template bucket",
+            Some(&context.region),
+        ));
+    }
+
+    // Block all public access — private bucket, CFN reads via same-account S3 access
+    let _ = run_command(&CommandSpec {
+        program: "aws".into(),
+        args: vec![
+            "s3api".into(), "put-public-access-block".into(),
+            "--bucket".into(), bucket.clone(),
+            "--public-access-block-configuration".into(),
+            "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true".into(),
+            "--region".into(), context.region.clone(),
+        ],
+        current_dir: None,
+    }).await;
+
+    // Enable SSE-S3 encryption
+    let _ = run_command(&CommandSpec {
+        program: "aws".into(),
+        args: vec![
+            "s3api".into(), "put-bucket-encryption".into(),
+            "--bucket".into(), bucket.clone(),
+            "--server-side-encryption-configuration".into(),
+            r#"{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}"#.into(),
+            "--region".into(), context.region.clone(),
+        ],
+        current_dir: None,
+    }).await;
+
+    let upload = run_command(&build_upload_template_command(
+        &context.template_path,
+        &bucket,
+        &context.stack_name,
+        &context.region,
+    ))
+    .await?;
+    if !upload.success() {
+        return Err(map_aws_command_failure(
+            &upload,
+            "Failed to upload CloudFormation template to S3",
+            Some(&context.region),
+        ));
+    }
+
+    event_sink
+        .emit(InstallEvent::LogLine {
+            message: format!("Uploaded CloudFormation template to {template_url}"),
+        })
+        .await;
+
+    Ok(StagedTemplate {
+        bucket,
+        url: template_url,
+    })
 }
 
 async fn wait_for_stack_completion(
@@ -696,7 +842,7 @@ struct ApplyStackCommandInput<'a> {
     operation: StackOperation,
     stack_name: &'a str,
     region: &'a str,
-    template_path: &'a str,
+    template_url: &'a str,
     capabilities: &'a str,
     pack: &'a str,
     profile: &'a str,
@@ -712,8 +858,8 @@ fn build_apply_stack_command(input: ApplyStackCommandInput<'_>) -> CommandSpec {
         },
         "--stack-name".into(),
         input.stack_name.into(),
-        "--template-body".into(),
-        format!("file://{}", input.template_path),
+        "--template-url".into(),
+        input.template_url.into(),
         "--capabilities".into(),
         input.capabilities.into(),
         "--parameters".into(),
@@ -731,6 +877,48 @@ fn build_apply_stack_command(input: ApplyStackCommandInput<'_>) -> CommandSpec {
     CommandSpec {
         program: "aws".into(),
         args,
+        current_dir: None,
+    }
+}
+
+fn build_create_bucket_command(bucket: &str, region: &str) -> CommandSpec {
+    let mut args = vec![
+        "s3api".into(),
+        "create-bucket".into(),
+        "--bucket".into(),
+        bucket.into(),
+        "--region".into(),
+        region.into(),
+    ];
+
+    if region != "us-east-1" {
+        args.push("--create-bucket-configuration".into());
+        args.push(format!("LocationConstraint={region}"));
+    }
+
+    CommandSpec {
+        program: "aws".into(),
+        args,
+        current_dir: None,
+    }
+}
+
+fn build_upload_template_command(
+    template_path: &str,
+    bucket: &str,
+    stack_name: &str,
+    region: &str,
+) -> CommandSpec {
+    CommandSpec {
+        program: "aws".into(),
+        args: vec![
+            "s3".into(),
+            "cp".into(),
+            template_path.into(),
+            format!("s3://{bucket}/loki-installer/{stack_name}/template.yaml"),
+            "--region".into(),
+            region.into(),
+        ],
         current_dir: None,
     }
 }
@@ -822,6 +1010,10 @@ fn no_updates_needed(stderr: &str) -> bool {
     stderr.contains("No updates are to be performed")
 }
 
+fn bucket_already_owned(stderr: &str) -> bool {
+    stderr.contains("BucketAlreadyOwnedByYou")
+}
+
 fn waiter_kind_for_status(status: &str) -> WaiterKind {
     if status.starts_with("UPDATE_") {
         WaiterKind::UpdateComplete
@@ -894,7 +1086,8 @@ fn map_aws_command_failure(
 mod tests {
     use super::{
         ApplyStackCommandInput, StackOperation, adapter_option_to_cfn_parameter,
-        build_apply_stack_command, build_validate_identity_command, parse_stack_artifacts,
+        build_apply_stack_command, build_create_bucket_command, build_upload_template_command,
+        build_validate_identity_command, parse_stack_artifacts,
     };
 
     #[test]
@@ -920,7 +1113,7 @@ mod tests {
             operation: StackOperation::Create,
             stack_name: "loki-openclaw",
             region: "us-east-1",
-            template_path: "deploy/cloudformation/template.yaml",
+            template_url: "https://s3.amazonaws.com/loki-deploy-123456789012/loki-installer/loki-openclaw/template.yaml",
             capabilities: "CAPABILITY_NAMED_IAM",
             pack: "openclaw",
             profile: "builder",
@@ -941,11 +1134,13 @@ mod tests {
                 "loki-openclaw"
             ]
         );
-        assert!(command.args.contains(&"--template-body".into()));
+        assert!(command.args.contains(&"--template-url".into()));
         assert!(
             command
                 .args
-                .contains(&"file://deploy/cloudformation/template.yaml".into())
+                .contains(
+                    &"https://s3.amazonaws.com/loki-deploy-123456789012/loki-installer/loki-openclaw/template.yaml".into()
+                )
         );
         assert!(command.args.contains(&"--capabilities".into()));
         assert!(command.args.contains(&"CAPABILITY_NAMED_IAM".into()));
@@ -977,6 +1172,47 @@ mod tests {
             command
                 .args
                 .ends_with(&["--region".into(), "us-east-1".into()])
+        );
+    }
+
+    #[test]
+    fn create_bucket_command_omits_location_constraint_for_us_east_1() {
+        let command = build_create_bucket_command("loki-deploy-123456789012", "us-east-1");
+
+        assert_eq!(command.program, "aws");
+        assert_eq!(
+            command.args,
+            vec![
+                "s3api",
+                "create-bucket",
+                "--bucket",
+                "loki-deploy-123456789012",
+                "--region",
+                "us-east-1",
+            ]
+        );
+    }
+
+    #[test]
+    fn upload_template_command_targets_stack_scoped_s3_path() {
+        let command = build_upload_template_command(
+            "/tmp/template.yaml",
+            "loki-deploy-123456789012",
+            "loki-openclaw",
+            "us-east-1",
+        );
+
+        assert_eq!(command.program, "aws");
+        assert_eq!(
+            command.args,
+            vec![
+                "s3",
+                "cp",
+                "/tmp/template.yaml",
+                "s3://loki-deploy-123456789012/loki-installer/loki-openclaw/template.yaml",
+                "--region",
+                "us-east-1",
+            ]
         );
     }
 

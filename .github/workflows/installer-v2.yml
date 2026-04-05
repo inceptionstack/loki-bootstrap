@@ -47,13 +47,13 @@ jobs:
           - artifact_os: linux
             artifact_arch: amd64
             runner: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
             binary_name: loki-installer-linux-amd64
             strip_command: strip
           - artifact_os: linux
             artifact_arch: arm64
             runner: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
+            target: aarch64-unknown-linux-musl
             binary_name: loki-installer-linux-arm64
             strip_command: aarch64-linux-gnu-strip
           - artifact_os: darwin
@@ -76,14 +76,30 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install Linux ARM64 linker
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Install Linux amd64 musl tooling
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Install Linux arm64 packaging tooling
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y binutils-aarch64-linux-gnu
+
+      - name: Install cross for Linux arm64 musl
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }} --manifest-path tools/loki-installer/Cargo.toml
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
+            cross build --release --target "${{ matrix.target }}" --manifest-path tools/loki-installer/Cargo.toml
+          else
+            cargo build --release --target "${{ matrix.target }}" --manifest-path tools/loki-installer/Cargo.toml
+          fi
         env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'aarch64-linux-gnu-gcc' || '' }}
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: ${{ matrix.target == 'x86_64-unknown-linux-musl' && 'musl-gcc' || '' }}
 
       - name: Package release artifact
         shell: bash

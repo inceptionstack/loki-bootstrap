@@ -83,6 +83,10 @@ async fn session_persistence_write_read_and_resume() {
         .expect("resume install");
     assert_eq!(resumable.phase, InstallPhase::PostInstall);
     assert!(resumable.artifacts.contains_key("stack_status"));
+    assert_eq!(
+        resumable.artifacts.get("template_url"),
+        Some(&"https://s3.amazonaws.com/loki-deploy-123456789012/loki-installer/loki-openclaw/template.yaml".into())
+    );
 
     match old_home {
         Some(value) => unsafe { std::env::set_var("HOME", value) },
@@ -115,6 +119,12 @@ set -euo pipefail
 case "$*" in
   *"sts get-caller-identity --output json --region us-east-1"*)
     printf '%s\n' '{"Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/test","UserId":"AIDATEST"}'
+    ;;
+  *"s3api create-bucket --bucket loki-deploy-123456789012 --region us-east-1"*)
+    printf '%s\n' '{"Location":"/loki-deploy-123456789012"}'
+    ;;
+  *"s3 cp "*" s3://loki-deploy-123456789012/loki-installer/loki-openclaw/template.yaml --region us-east-1"*)
+    printf '%s\n' 'upload: template.yaml'
     ;;
   *"cloudformation update-stack"*)
     printf '%s\n' '{"StackId":"arn:aws:cloudformation:us-east-1:123456789012:stack/loki-openclaw/test"}'
