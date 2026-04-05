@@ -141,6 +141,7 @@ async fn run_actions(
                     state.deployment.current_step_id = None;
                     state.deployment.completed_steps.clear();
                     state.deployment.failed_steps.clear();
+                    state.deployment.finished_at = None;
                     state.deployment.logs.clear();
                     state.deployment.scroll_offset = 0;
                     state.deployment.spinner_frame = 0;

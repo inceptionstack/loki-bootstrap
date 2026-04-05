@@ -237,6 +237,7 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
         InstallerEvent::DeployFinished(session) => {
             state.session = Some(*session);
             state.deployment.current_step_id = None;
+            state.deployment.finished_at = Some(Instant::now());
             state.screen = ScreenId::PostInstall;
             vec![AppAction::Render]
         }
@@ -336,8 +337,13 @@ fn advance(state: &mut AppState) -> Vec<AppAction> {
             state.screen = ScreenId::DeployProgress;
             vec![AppAction::StartDeploy]
         }
-        ScreenId::PostInstall => vec![AppAction::Exit],
-        ScreenId::DeployProgress => vec![AppAction::Render],
+        ScreenId::PostInstall => vec![AppAction::Render],
+        ScreenId::DeployProgress => {
+            if state.deployment.finished_at.is_some() {
+                state.screen = ScreenId::PostInstall;
+            }
+            vec![AppAction::Render]
+        }
     }
 }
 
@@ -755,6 +761,16 @@ mod tests {
 
         let actions = update(
             &mut state,
+            InstallerEvent::DeployStepStarted {
+                step_id: "apply".into(),
+                display_name: "Apply deployment".into(),
+            },
+        );
+        assert_eq!(state.deployment.current_step_id.as_deref(), Some("apply"));
+        assert!(matches!(actions.as_slice(), [AppAction::Render]));
+
+        let actions = update(
+            &mut state,
             InstallerEvent::DeployLogLine {
                 message: "Planning stack".into(),
                 phase: Some(InstallPhase::PlanDeployment),
@@ -764,7 +780,10 @@ mod tests {
             state.deployment.current_phase,
             Some(InstallPhase::PlanDeployment)
         );
-        assert_eq!(state.deployment.logs, vec!["Planning stack"]);
+        assert_eq!(
+            state.deployment.logs,
+            vec!["Starting Apply deployment (apply)", "Planning stack"]
+        );
         assert!(matches!(actions.as_slice(), [AppAction::Render]));
 
         let session = InstallSession {
@@ -799,6 +818,7 @@ mod tests {
         );
         assert_eq!(state.screen, ScreenId::PostInstall);
         assert_eq!(state.session.as_ref(), Some(&session));
+        assert!(state.deployment.finished_at.is_some());
         assert!(matches!(actions.as_slice(), [AppAction::Render]));
 
         let actions = update(&mut state, InstallerEvent::DeployFailed("boom".into()));
@@ -807,6 +827,29 @@ mod tests {
             state.errors.last().map(|err| err.message.as_str()),
             Some("boom")
         );
+        assert!(matches!(actions.as_slice(), [AppAction::Render]));
+    }
+
+    #[test]
+    fn right_arrow_does_not_exit_post_install() {
+        let mut state = AppState::default();
+        state.screen = ScreenId::PostInstall;
+
+        let actions = update(&mut state, InstallerEvent::KeyPressed(key(KeyCode::Right)));
+
+        assert_eq!(state.screen, ScreenId::PostInstall);
+        assert!(matches!(actions.as_slice(), [AppAction::Render]));
+    }
+
+    #[test]
+    fn right_arrow_advances_deploy_progress_when_finished() {
+        let mut state = AppState::default();
+        state.screen = ScreenId::DeployProgress;
+        state.deployment.finished_at = Some(Instant::now());
+
+        let actions = update(&mut state, InstallerEvent::KeyPressed(key(KeyCode::Right)));
+
+        assert_eq!(state.screen, ScreenId::PostInstall);
         assert!(matches!(actions.as_slice(), [AppAction::Render]));
     }
 }

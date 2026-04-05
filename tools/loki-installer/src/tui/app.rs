@@ -74,6 +74,7 @@ pub struct DeploymentState {
     pub current_step_id: Option<String>,
     pub completed_steps: BTreeSet<String>,
     pub failed_steps: BTreeSet<String>,
+    pub finished_at: Option<Instant>,
     pub logs: Vec<String>,
     pub scroll_offset: usize,
     pub spinner_frame: usize,
