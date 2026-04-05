@@ -1,6 +1,9 @@
-use crate::core::AdapterError;
+use crate::core::{AdapterError, InstallEvent, InstallEventSink};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::mpsc::unbounded_channel;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CommandSpec {
@@ -45,20 +48,116 @@ pub(crate) async fn run_command(spec: &CommandSpec) -> Result<CommandOutput, Ada
     })
 }
 
-pub(crate) fn spawn_child(spec: &CommandSpec) -> Result<tokio::process::Child, AdapterError> {
-    build_command(spec).spawn().map_err(|source| {
-        if source.kind() == std::io::ErrorKind::NotFound {
-            return AdapterError::Message(format!(
-                "{} not found — install {} and re-run the installer",
-                spec.program, spec.program
-            ));
+pub(crate) async fn run_command_streaming(
+    spec: &CommandSpec,
+    event_sink: &mut dyn InstallEventSink,
+) -> Result<CommandOutput, AdapterError> {
+    let mut command = build_command(spec);
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = spawn_command(command, spec)?;
+
+    let stdout = child.stdout.take().ok_or_else(|| {
+        AdapterError::Message(format!("Failed to capture stdout for {}", spec.program))
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        AdapterError::Message(format!("Failed to capture stderr for {}", spec.program))
+    })?;
+
+    #[derive(Debug)]
+    enum StreamMessage {
+        Stdout(String),
+        Stderr(String),
+        ReadError(String),
+    }
+
+    async fn forward_lines<R>(
+        reader: R,
+        tx: tokio::sync::mpsc::UnboundedSender<StreamMessage>,
+        is_stdout: bool,
+    ) where
+        R: tokio::io::AsyncRead + Unpin + Send + 'static,
+    {
+        let mut lines = BufReader::new(reader).lines();
+        loop {
+            match lines.next_line().await {
+                Ok(Some(line)) => {
+                    let message = if is_stdout {
+                        StreamMessage::Stdout(line)
+                    } else {
+                        StreamMessage::Stderr(line)
+                    };
+                    if tx.send(message).is_err() {
+                        return;
+                    }
+                }
+                Ok(None) => return,
+                Err(err) => {
+                    let _ = tx.send(StreamMessage::ReadError(err.to_string()));
+                    return;
+                }
+            }
         }
+    }
+
+    let (tx, mut rx) = unbounded_channel();
+    let stdout_task = tokio::spawn(forward_lines(stdout, tx.clone(), true));
+    let stderr_task = tokio::spawn(forward_lines(stderr, tx.clone(), false));
+    drop(tx);
+
+    let mut stdout_lines = Vec::new();
+    let mut stderr_lines = Vec::new();
+
+    while let Some(message) = rx.recv().await {
+        match message {
+            StreamMessage::Stdout(line) => {
+                event_sink
+                    .emit(InstallEvent::LogLine {
+                        message: line.clone(),
+                    })
+                    .await;
+                stdout_lines.push(line);
+            }
+            StreamMessage::Stderr(line) => {
+                event_sink
+                    .emit(InstallEvent::LogLine {
+                        message: line.clone(),
+                    })
+                    .await;
+                stderr_lines.push(line);
+            }
+            StreamMessage::ReadError(err) => {
+                return Err(AdapterError::Message(format!(
+                    "Failed to stream {} output — {err}",
+                    spec.program
+                )));
+            }
+        }
+    }
+
+    let status = child.wait().await.map_err(|source| {
         AdapterError::Message(format!(
-            "Failed to start {} {} — {source}",
+            "Failed to wait for {} {} — {source}",
             spec.program,
             spec.args.join(" ")
         ))
+    })?;
+
+    stdout_task
+        .await
+        .map_err(|source| AdapterError::Message(format!("stdout task failed — {source}")))?;
+    stderr_task
+        .await
+        .map_err(|source| AdapterError::Message(format!("stderr task failed — {source}")))?;
+
+    Ok(CommandOutput {
+        status_code: status.code(),
+        stdout: stdout_lines.join("\n").trim().to_string(),
+        stderr: stderr_lines.join("\n").trim().to_string(),
     })
+}
+
+pub(crate) fn spawn_child(spec: &CommandSpec) -> Result<tokio::process::Child, AdapterError> {
+    spawn_command(build_command(spec), spec)
 }
 
 pub(crate) fn resolve_repo_path_from(
@@ -108,4 +207,23 @@ fn build_command(spec: &CommandSpec) -> Command {
         command.current_dir(Path::new(current_dir));
     }
     command
+}
+
+fn spawn_command(
+    mut command: Command,
+    spec: &CommandSpec,
+) -> Result<tokio::process::Child, AdapterError> {
+    command.spawn().map_err(|source| {
+        if source.kind() == std::io::ErrorKind::NotFound {
+            return AdapterError::Message(format!(
+                "{} not found — install {} and re-run the installer",
+                spec.program, spec.program
+            ));
+        }
+        AdapterError::Message(format!(
+            "Failed to start {} {} — {source}",
+            spec.program,
+            spec.args.join(" ")
+        ))
+    })
 }

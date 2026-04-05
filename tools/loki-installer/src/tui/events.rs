@@ -18,10 +18,23 @@ pub enum InstallerEvent {
     MethodsLoaded(Result<Vec<MethodManifest>, String>),
     DoctorCompleted(Result<crate::core::DoctorReport, String>),
     PlanBuilt(Box<Result<InstallPlan, String>>),
+    DeployPhaseStarted {
+        phase: InstallPhase,
+        message: String,
+    },
+    DeployStepStarted {
+        step_id: String,
+        display_name: String,
+    },
+    DeployStepFinished {
+        step_id: String,
+        message: String,
+    },
     DeployLogLine {
         message: String,
         phase: Option<InstallPhase>,
     },
     DeployFinished(Box<InstallSession>),
     DeployFailed(String),
+    Tick,
 }

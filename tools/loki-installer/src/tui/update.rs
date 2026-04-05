@@ -3,6 +3,7 @@
 use crate::tui::app::{AppLifecycle, AppState, ScreenId, UserFacingError};
 use crate::tui::events::InstallerEvent;
 use crossterm::event::{KeyCode, KeyModifiers};
+use std::time::Instant;
 
 #[derive(Debug)]
 pub enum AppAction {
@@ -61,11 +62,11 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
                 KeyCode::Char(' ') => select_current(state),
                 KeyCode::Char('r') => retry(state),
                 KeyCode::Down | KeyCode::Char('j') => {
-                    move_cursor(state, 1);
+                    move_cursor_or_scroll_logs(state, 1);
                     vec![AppAction::Render]
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    move_cursor(state, -1);
+                    move_cursor_or_scroll_logs(state, -1);
                     vec![AppAction::Render]
                 }
                 _ => vec![AppAction::Render],
@@ -73,21 +74,51 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
         }
         InstallerEvent::PacksLoaded(result) => {
             if let Ok(packs) = result {
-                state.packs = packs;
+                state.auto_selected_pack = false;
+                state.auto_selected_profile = false;
+                state.packs = packs.into_iter().filter(|pack| !pack.experimental).collect();
+                state.request_draft.pack_cursor = 0;
+                state.request_draft.profile_cursor = 0;
                 if let Some(pack) = state.packs.get(state.request_draft.pack_cursor) {
                     state.request_draft.pack_id = Some(pack.id.clone());
                 }
                 state.screen = ScreenId::PackSelection;
+                if let Some(pack_idx) = find_pack_index(&state.packs, "openclaw") {
+                    state.request_draft.pack_cursor = pack_idx;
+                    if let Some(pack) = state.packs.get(pack_idx) {
+                        state.request_draft.pack_id = Some(pack.id.clone());
+                        state.request_draft.profile_id = pack.default_profile.clone();
+                        state.request_draft.method_id = pack.default_method;
+                        state.auto_selected_pack = true;
+                        return vec![AppAction::LoadProfiles {
+                            pack_id: pack.id.clone(),
+                        }];
+                    }
+                }
             }
             vec![AppAction::Render]
         }
         InstallerEvent::ProfilesLoaded(result) => {
             if let Ok(profiles) = result {
                 state.profiles = profiles;
+                state.auto_selected_profile = false;
+                state.request_draft.profile_cursor = 0;
                 if let Some(profile) = state.profiles.get(state.request_draft.profile_cursor) {
                     state.request_draft.profile_id = Some(profile.id.clone());
                 }
                 state.screen = ScreenId::ProfileSelection;
+                if let Some(profile_idx) = find_profile_index(&state.profiles, "builder") {
+                    state.request_draft.profile_cursor = profile_idx;
+                    if let Some(profile) = state.profiles.get(profile_idx) {
+                        state.request_draft.profile_id = Some(profile.id.clone());
+                        state.auto_selected_profile = true;
+                        if let Some(pack_id) = &state.request_draft.pack_id {
+                            return vec![AppAction::LoadMethods {
+                                pack_id: pack_id.clone(),
+                            }];
+                        }
+                    }
+                }
             }
             vec![AppAction::Render]
         }
@@ -123,6 +154,36 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
             }
             vec![AppAction::Render]
         }
+        InstallerEvent::DeployPhaseStarted { phase, message } => {
+            state.deployment.current_phase = Some(phase);
+            state.deployment.logs.push(message);
+            vec![AppAction::Render]
+        }
+        InstallerEvent::DeployStepStarted {
+            step_id,
+            display_name,
+        } => {
+            state.deployment.current_step_id = Some(step_id.clone());
+            state.deployment.failed_steps.remove(&step_id);
+            state
+                .deployment
+                .logs
+                .push(format!("Starting {display_name} ({step_id})"));
+            vec![AppAction::Render]
+        }
+        InstallerEvent::DeployStepFinished { step_id, message } => {
+            state.deployment.completed_steps.insert(step_id.clone());
+            if state.deployment.current_step_id.as_deref() == Some(step_id.as_str()) {
+                state.deployment.current_step_id = None;
+            }
+            let summary = if message.is_empty() {
+                format!("Finished {step_id}")
+            } else {
+                format!("Finished {step_id}: {message}")
+            };
+            state.deployment.logs.push(summary);
+            vec![AppAction::Render]
+        }
         InstallerEvent::DeployLogLine { message, phase } => {
             if let Some(phase) = phase {
                 state.deployment.current_phase = Some(phase);
@@ -132,13 +193,31 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
         }
         InstallerEvent::DeployFinished(session) => {
             state.session = Some(*session);
+            state.deployment.current_step_id = None;
             state.screen = ScreenId::PostInstall;
             vec![AppAction::Render]
         }
         InstallerEvent::DeployFailed(err) => {
+            if let Some(step_id) = state.deployment.current_step_id.clone() {
+                state.deployment.failed_steps.insert(step_id);
+                state.deployment.current_step_id = None;
+            }
+            state
+                .deployment
+                .logs
+                .push(format!("Deployment failed: {err}"));
             state.errors.push(UserFacingError { message: err });
             state.screen = ScreenId::DeployProgress;
             vec![AppAction::Render]
+        }
+        InstallerEvent::Tick => {
+            if state.screen == ScreenId::DeployProgress {
+                state.deployment.spinner_frame =
+                    (state.deployment.spinner_frame + 1) % crate::tui::screens::deploy::SPINNER.len();
+                state.deployment.last_tick = Some(Instant::now());
+                return vec![AppAction::Render];
+            }
+            Vec::new()
         }
         InstallerEvent::Resize { width, height } => {
             state.ui.width = width;
@@ -153,6 +232,12 @@ fn advance(state: &mut AppState) -> Vec<AppAction> {
         ScreenId::Welcome => vec![AppAction::RunDoctor],
         ScreenId::DoctorPreflight => vec![AppAction::LoadPacks],
         ScreenId::PackSelection => {
+            if !state.auto_selected_pack
+                && let Some(pack_idx) = find_pack_index(&state.packs, "openclaw")
+            {
+                state.request_draft.pack_cursor = pack_idx;
+                state.auto_selected_pack = true;
+            }
             if let Some(pack) = state.packs.get(state.request_draft.pack_cursor) {
                 state.request_draft.pack_id = Some(pack.id.clone());
                 state.request_draft.profile_id = pack.default_profile.clone();
@@ -165,6 +250,12 @@ fn advance(state: &mut AppState) -> Vec<AppAction> {
             }
         }
         ScreenId::ProfileSelection => {
+            if !state.auto_selected_profile
+                && let Some(profile_idx) = find_profile_index(&state.profiles, "builder")
+            {
+                state.request_draft.profile_cursor = profile_idx;
+                state.auto_selected_profile = true;
+            }
             if let Some(profile) = state.profiles.get(state.request_draft.profile_cursor) {
                 state.request_draft.profile_id = Some(profile.id.clone());
             }
@@ -238,6 +329,44 @@ fn move_cursor(state: &mut AppState, delta: isize) {
         }
         _ => {}
     }
+}
+
+fn move_cursor_or_scroll_logs(state: &mut AppState, delta: isize) {
+    if state.screen == ScreenId::DeployProgress {
+        let visible_lines = 30usize;
+        let max_offset = state.deployment.logs.len().saturating_sub(visible_lines);
+        if delta.is_negative() {
+            state.deployment.scroll_offset = state
+                .deployment
+                .scroll_offset
+                .saturating_add(delta.unsigned_abs())
+                .min(max_offset);
+        } else {
+            state.deployment.scroll_offset = state
+                .deployment
+                .scroll_offset
+                .saturating_sub(delta as usize);
+        }
+        return;
+    }
+
+    move_cursor(state, delta);
+}
+
+fn find_pack_index(
+    packs: &[crate::core::PackManifest],
+    target_pack_id: &str,
+) -> Option<usize> {
+    packs.iter().position(|pack| pack.id == target_pack_id)
+}
+
+fn find_profile_index(
+    profiles: &[crate::core::ProfileManifest],
+    target_profile_id: &str,
+) -> Option<usize> {
+    profiles
+        .iter()
+        .position(|profile| profile.id == target_profile_id)
 }
 
 fn select_current(state: &mut AppState) -> Vec<AppAction> {
@@ -380,6 +509,96 @@ mod tests {
             &mut state,
             InstallerEvent::KeyPressed(key(KeyCode::Char('r'))),
         );
+        assert!(matches!(
+            actions.as_slice(),
+            [AppAction::LoadMethods { pack_id }] if pack_id == "openclaw"
+        ));
+    }
+
+    #[test]
+    fn packs_loaded_auto_selects_openclaw_and_filters_experimental() {
+        let mut state = AppState::default();
+
+        let actions = update(
+            &mut state,
+            InstallerEvent::PacksLoaded(Ok(vec![
+                PackManifest {
+                    schema_version: 1,
+                    id: "hermes".into(),
+                    display_name: "Hermes".into(),
+                    description: None,
+                    experimental: true,
+                    allowed_profiles: vec!["builder".into()],
+                    supported_methods: vec![DeployMethodId::Cfn],
+                    default_profile: Some("builder".into()),
+                    default_method: Some(DeployMethodId::Cfn),
+                    default_region: Some("us-east-1".into()),
+                    post_install: vec![],
+                    required_env: vec![],
+                    extra_options_schema: Default::default(),
+                },
+                PackManifest {
+                    schema_version: 1,
+                    id: "openclaw".into(),
+                    display_name: "OpenClaw".into(),
+                    description: None,
+                    experimental: false,
+                    allowed_profiles: vec!["builder".into()],
+                    supported_methods: vec![DeployMethodId::Cfn],
+                    default_profile: Some("builder".into()),
+                    default_method: Some(DeployMethodId::Cfn),
+                    default_region: Some("us-east-1".into()),
+                    post_install: vec![],
+                    required_env: vec![],
+                    extra_options_schema: Default::default(),
+                },
+            ])),
+        );
+
+        assert_eq!(state.packs.len(), 1);
+        assert_eq!(state.request_draft.pack_id.as_deref(), Some("openclaw"));
+        assert!(state.auto_selected_pack);
+        assert!(matches!(
+            actions.as_slice(),
+            [AppAction::LoadProfiles { pack_id }] if pack_id == "openclaw"
+        ));
+    }
+
+    #[test]
+    fn profiles_loaded_auto_selects_builder() {
+        let mut state = AppState::default();
+        state.request_draft.pack_id = Some("openclaw".into());
+
+        let actions = update(
+            &mut state,
+            InstallerEvent::ProfilesLoaded(Ok(vec![
+                ProfileManifest {
+                    schema_version: 1,
+                    id: "account_assistant".into(),
+                    display_name: "Account Assistant".into(),
+                    description: None,
+                    supported_packs: vec!["openclaw".into()],
+                    default_method: Some(DeployMethodId::Cfn),
+                    default_region: Some("us-east-1".into()),
+                    config: Default::default(),
+                    tags: Default::default(),
+                },
+                ProfileManifest {
+                    schema_version: 1,
+                    id: "builder".into(),
+                    display_name: "Builder".into(),
+                    description: None,
+                    supported_packs: vec!["openclaw".into()],
+                    default_method: Some(DeployMethodId::Cfn),
+                    default_region: Some("us-east-1".into()),
+                    config: Default::default(),
+                    tags: Default::default(),
+                },
+            ])),
+        );
+
+        assert_eq!(state.request_draft.profile_id.as_deref(), Some("builder"));
+        assert!(state.auto_selected_profile);
         assert!(matches!(
             actions.as_slice(),
             [AppAction::LoadMethods { pack_id }] if pack_id == "openclaw"

@@ -17,12 +17,16 @@ use ratatui::{
     Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Flex, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, Paragraph},
 };
-use std::collections::VecDeque;
+use serde::Deserialize;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::{self, Stdout};
+use std::time::Duration;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::time::MissedTickBehavior;
 
 pub async fn run(planner: Planner) -> Result<()> {
     enable_raw_mode()?;
@@ -33,6 +37,8 @@ pub async fn run(planner: Planner) -> Result<()> {
     let mut state = AppState::default();
     let mut events = EventStream::new();
     let (deploy_tx, mut deploy_rx) = unbounded_channel();
+    let mut tick = tokio::time::interval(Duration::from_millis(100));
+    tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     let mut pending = VecDeque::from(update(&mut state, InstallerEvent::AppStarted));
     while state.lifecycle == AppLifecycle::Running {
@@ -65,6 +71,9 @@ pub async fn run(planner: Planner) -> Result<()> {
                     pending.extend(update(&mut state, event));
                 }
             }
+            _ = tick.tick() => {
+                pending.extend(update(&mut state, InstallerEvent::Tick));
+            }
         }
     }
 
@@ -85,7 +94,7 @@ async fn run_actions(
         match action {
             AppAction::Render => render(terminal, state)?,
             AppAction::LoadPacks => {
-                let packs = planner.repo().load_all_packs().map_err(|e| e.to_string());
+                let packs = load_tui_packs(planner).map_err(|e| e.to_string());
                 pending.extend(update(state, InstallerEvent::PacksLoaded(packs)));
             }
             AppAction::LoadProfiles { pack_id } => {
@@ -129,7 +138,13 @@ async fn run_actions(
             AppAction::StartDeploy => {
                 if let Some(plan) = state.plan.clone() {
                     state.deployment.current_phase = None;
+                    state.deployment.current_step_id = None;
+                    state.deployment.completed_steps.clear();
+                    state.deployment.failed_steps.clear();
                     state.deployment.logs.clear();
+                    state.deployment.scroll_offset = 0;
+                    state.deployment.spinner_frame = 0;
+                    state.deployment.last_tick = None;
                     render(terminal, state)?;
 
                     let planner = planner.clone();
@@ -205,23 +220,24 @@ impl InstallEventSink for TuiEventSink {
     async fn emit(&mut self, event: InstallEvent) {
         let result = match event {
             InstallEvent::PhaseStarted { phase, message } => {
-                self.emit_line(message, Some(phase)).await
+                self.tx
+                    .send(InstallerEvent::DeployPhaseStarted { phase, message })
+                    .map_err(|err| err.to_string())
             }
             InstallEvent::StepStarted {
                 step_id,
                 display_name,
-            } => {
-                self.emit_line(format!("Starting {display_name} ({step_id})"), None)
-                    .await
-            }
-            InstallEvent::StepFinished { step_id, message } => {
-                let summary = if message.is_empty() {
-                    format!("Finished {step_id}")
-                } else {
-                    format!("Finished {step_id}: {message}")
-                };
-                self.emit_line(summary, None).await
-            }
+            } => self
+                .tx
+                .send(InstallerEvent::DeployStepStarted {
+                    step_id,
+                    display_name,
+                })
+                .map_err(|err| err.to_string()),
+            InstallEvent::StepFinished { step_id, message } => self
+                .tx
+                .send(InstallerEvent::DeployStepFinished { step_id, message })
+                .map_err(|err| err.to_string()),
             InstallEvent::Warning { code, message } => {
                 self.emit_line(format!("Warning [{code}]: {message}"), None)
                     .await
@@ -263,7 +279,7 @@ fn render(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &AppState) -
             .constraints([Constraint::Length(22), Constraint::Min(20)])
             .split(areas[0]);
 
-        let checklist = [
+        let screen_order = [
             ScreenId::Welcome,
             ScreenId::DoctorPreflight,
             ScreenId::PackSelection,
@@ -272,14 +288,33 @@ fn render(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &AppState) -
             ScreenId::Review,
             ScreenId::DeployProgress,
             ScreenId::PostInstall,
-        ]
-        .iter()
-        .map(|screen| {
-            let marker = if *screen == state.screen { ">" } else { " " };
-            format!("{marker} {}", screen_title(*screen))
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+        ];
+        let current_idx = screen_order
+            .iter()
+            .position(|screen| *screen == state.screen)
+            .unwrap_or(0);
+        let checklist = Text::from(
+            screen_order
+                .iter()
+                .enumerate()
+                .map(|(idx, screen)| {
+                    let style = if idx < current_idx {
+                        Style::default().fg(Color::Green)
+                    } else if idx == current_idx {
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    };
+                    let marker = if idx == current_idx { ">" } else { " " };
+                    Line::from(vec![Span::styled(
+                        format!("{marker} {}", screen_title(*screen)),
+                        style,
+                    )])
+                })
+                .collect::<Vec<_>>(),
+        );
 
         frame.render_widget(
             Paragraph::new(checklist)
@@ -298,17 +333,18 @@ fn render(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &AppState) -
             ScreenId::PostInstall => screens::post_install::content(state),
         };
 
-        frame.render_widget(
-            Paragraph::new(content).block(
-                Block::default()
-                    .title(screen_title(state.screen))
-                    .borders(Borders::ALL),
-            ),
-            body[1],
+        let mut paragraph = Paragraph::new(content).block(
+            Block::default()
+                .title(screen_title(state.screen))
+                .borders(Borders::ALL),
         );
+        if state.screen == ScreenId::DeployProgress {
+            paragraph = paragraph.scroll((state.deployment.scroll_offset as u16, 0));
+        }
+        frame.render_widget(paragraph, body[1]);
 
         frame.render_widget(
-            Paragraph::new(footer_text(state)).style(Style::default().add_modifier(Modifier::BOLD)),
+            Paragraph::new(footer_text(state)),
             areas[1],
         );
 
@@ -325,18 +361,30 @@ fn render(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &AppState) -
     Ok(())
 }
 
-fn footer_text(state: &AppState) -> String {
+fn footer_text(state: &AppState) -> Text<'static> {
     if state.ui.help_visible {
-        return "Help open | Esc close | q quit".into();
+        return Text::from(Line::from(vec![Span::styled(
+            "Help open | Esc close | q quit",
+            Style::default().fg(Color::DarkGray),
+        )]));
     }
 
     state
         .errors
         .last()
-        .map(|error| format!("Error: {} | ? help | q quit | b/h back", error.message))
+        .map(|error| {
+            Text::from(Line::from(vec![Span::styled(
+                format!("Error: {} | ? help | q quit | b/h back", error.message),
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            )]))
+        })
         .unwrap_or_else(|| {
-            "Hints: Enter/Tab/l next | Space select | b/h back | arrows move | ? help | q quit"
-                .into()
+            Text::from(Line::from(vec![Span::styled(
+                "Hints: Enter/Tab/l next | Space select | b/h back | arrows move | ? help | q quit",
+                Style::default().fg(Color::DarkGray),
+            )]))
         })
 }
 
@@ -359,4 +407,44 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
         .flex(Flex::Center)
         .areas(vertical);
     horizontal
+}
+
+#[derive(Debug, Deserialize)]
+struct RegistryFile {
+    packs: BTreeMap<String, RegistryPack>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RegistryPack {
+    #[serde(rename = "type")]
+    pack_type: String,
+}
+
+fn load_tui_packs(planner: &Planner) -> Result<Vec<crate::core::PackManifest>, crate::core::ManifestError> {
+    let mut packs = planner.repo().load_all_packs()?;
+    let packs_root = planner.repo().root().join("packs");
+    let registry_path = packs_root.join("registry.yaml");
+    let agent_ids = std::fs::read_to_string(&registry_path)
+        .ok()
+        .and_then(|raw| serde_yaml::from_str::<RegistryFile>(&raw).ok())
+        .map(|registry| {
+            registry
+                .packs
+                .into_iter()
+                .filter_map(|(pack_id, pack)| (pack.pack_type == "agent").then_some(pack_id))
+                .collect::<std::collections::BTreeSet<_>>()
+        });
+
+    packs.retain(|pack| {
+        let pack_root = packs_root.join(&pack.id);
+        let is_agent = agent_ids
+            .as_ref()
+            .map(|ids| ids.contains(&pack.id))
+            .unwrap_or(true);
+        is_agent
+            && pack.schema_version > 0
+            && pack_root.join("manifest.yaml").is_file()
+            && pack_root.join("install.sh").is_file()
+    });
+    Ok(packs)
 }

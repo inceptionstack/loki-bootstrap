@@ -1,6 +1,8 @@
 //! Terraform deployment adapter.
 
-use crate::adapters::support::{CommandOutput, CommandSpec, resolve_repo_path_from, run_command};
+use crate::adapters::support::{
+    CommandOutput, CommandSpec, resolve_repo_path_from, run_command, run_command_streaming,
+};
 use crate::core::{
     AdapterError, AdapterPlan, AdapterValidationError, ApplyResult, DeployAction, DeployAdapter,
     DeployMethodId, DeployStatus, DeployStep, InstallEvent, InstallEventSink, InstallPhase,
@@ -283,10 +285,13 @@ async fn apply_terraform(
                 .await;
             }
             "terraform-apply" => {
-                let output = run_command(&build_terraform_apply_command(
+                let output = run_command_streaming(
+                    &build_terraform_apply_command(
                     &context.working_dir,
                     &context.plan_file,
-                ))
+                ),
+                    event_sink,
+                )
                 .await?;
                 let apply_output = if output.success() {
                     output
@@ -335,10 +340,13 @@ async fn apply_terraform(
                         )
                         .await;
 
-                        let retry_apply = run_command(&build_terraform_apply_command(
-                            &context.working_dir,
-                            &context.plan_file,
-                        ))
+                        let retry_apply = run_command_streaming(
+                            &build_terraform_apply_command(
+                                &context.working_dir,
+                                &context.plan_file,
+                            ),
+                            event_sink,
+                        )
                         .await?;
                         ensure_terraform_success(
                             &retry_apply,

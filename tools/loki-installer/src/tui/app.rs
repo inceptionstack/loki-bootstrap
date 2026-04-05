@@ -4,6 +4,8 @@ use crate::core::{
     DoctorReport, InstallMode, InstallPlan, InstallRequest, InstallSession, InstallerEngine,
     MethodManifest, PackManifest, ProfileManifest,
 };
+use std::collections::BTreeSet;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScreenId {
@@ -62,7 +64,13 @@ pub struct DoctorState {
 #[derive(Debug, Clone, Default)]
 pub struct DeploymentState {
     pub current_phase: Option<crate::core::InstallPhase>,
+    pub current_step_id: Option<String>,
+    pub completed_steps: BTreeSet<String>,
+    pub failed_steps: BTreeSet<String>,
     pub logs: Vec<String>,
+    pub scroll_offset: usize,
+    pub spinner_frame: usize,
+    pub last_tick: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -91,6 +99,8 @@ pub struct AppState {
     pub packs: Vec<PackManifest>,
     pub profiles: Vec<ProfileManifest>,
     pub methods: Vec<MethodManifest>,
+    pub auto_selected_pack: bool,
+    pub auto_selected_profile: bool,
 }
 
 impl Default for AppState {
@@ -108,6 +118,8 @@ impl Default for AppState {
             packs: Vec::new(),
             profiles: Vec::new(),
             methods: Vec::new(),
+            auto_selected_pack: false,
+            auto_selected_profile: false,
         }
     }
 }
