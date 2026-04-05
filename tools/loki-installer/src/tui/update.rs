@@ -283,13 +283,8 @@ fn advance(state: &mut AppState) -> Vec<AppAction> {
                 state.request_draft.profile_id = Some("builder".into());
                 state.request_draft.method_id = Some(DeployMethodId::Terraform);
                 state.request_draft.region = Some("us-east-1".into());
-                state.auto_selected_pack = true;
-                state.auto_selected_profile = true;
-                state.auto_selected_method = true;
-                vec![AppAction::BuildPlan]
-            } else {
-                vec![AppAction::LoadPacks]
             }
+            vec![AppAction::LoadPacks]
         }
         ScreenId::PackSelection => {
             if !state.auto_selected_pack
@@ -310,6 +305,12 @@ fn advance(state: &mut AppState) -> Vec<AppAction> {
             }
         }
         ScreenId::ProfileSelection => {
+            if state.install_mode == TuiInstallMode::Simple {
+                state.request_draft.method_id = Some(DeployMethodId::Terraform);
+                state.request_draft.region = Some("us-east-1".into());
+                state.auto_selected_method = true;
+                return vec![AppAction::BuildPlan];
+            }
             if !state.auto_selected_profile
                 && let Some(profile_idx) = find_profile_index(&state.profiles, "builder")
             {
@@ -721,7 +722,7 @@ mod tests {
     }
 
     #[test]
-    fn simple_mode_skips_selection_and_builds_plan_after_doctor() {
+    fn simple_mode_preselects_defaults_and_loads_packs_after_doctor() {
         let mut state = AppState::default();
         state.screen = ScreenId::DoctorPreflight;
         state.install_mode = TuiInstallMode::Simple;
@@ -735,7 +736,7 @@ mod tests {
             Some(DeployMethodId::Terraform)
         );
         assert_eq!(state.request_draft.region.as_deref(), Some("us-east-1"));
-        assert!(matches!(actions.as_slice(), [AppAction::BuildPlan]));
+        assert!(matches!(actions.as_slice(), [AppAction::LoadPacks]));
     }
 
     #[test]
