@@ -347,7 +347,7 @@ resource "aws_lambda_function" "bedrock_form" {
 }
 
 resource "null_resource" "bedrock_form_invoke" {
-  count      = var.enable_satellite_services ? 1 : 0
+  count      = var.enable_satellite_services && var.request_quota_increases == "true" ? 1 : 0
   depends_on = [aws_lambda_function.bedrock_form]
 
   provisioner "local-exec" {

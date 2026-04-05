@@ -166,7 +166,10 @@ pub(crate) async fn run_command_streaming(
 fn strip_ansi(input: &str) -> String {
     let re = Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]").unwrap();
     let cleaned = re.replace_all(input, "");
-    cleaned.replace(['│', '╵', '╷'], "").trim().to_string()
+    cleaned
+        .replace(['│', '╵', '╷'], "").replace('\r', "")
+        .trim()
+        .to_string()
 }
 
 pub(crate) fn spawn_child(spec: &CommandSpec) -> Result<tokio::process::Child, AdapterError> {

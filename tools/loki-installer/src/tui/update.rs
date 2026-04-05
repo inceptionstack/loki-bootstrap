@@ -119,10 +119,6 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
                         state.request_draft.pack_id = Some(pack.id.clone());
                         state.request_draft.profile_id = pack.default_profile.clone();
                         state.request_draft.method_id = pack.default_method;
-                        state.auto_selected_pack = true;
-                        return vec![AppAction::LoadProfiles {
-                            pack_id: pack.id.clone(),
-                        }];
                     }
                 }
             }
@@ -142,12 +138,6 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
                     state.request_draft.profile_cursor = profile_idx;
                     if let Some(profile) = state.profiles.get(profile_idx) {
                         state.request_draft.profile_id = Some(profile.id.clone());
-                        state.auto_selected_profile = true;
-                        if let Some(pack_id) = &state.request_draft.pack_id {
-                            return vec![AppAction::LoadMethods {
-                                pack_id: pack_id.clone(),
-                            }];
-                        }
                     }
                 }
             }
@@ -630,11 +620,8 @@ mod tests {
 
         assert_eq!(state.packs.len(), 1);
         assert_eq!(state.request_draft.pack_id.as_deref(), Some("openclaw"));
-        assert!(state.auto_selected_pack);
-        assert!(matches!(
-            actions.as_slice(),
-            [AppAction::LoadProfiles { pack_id }] if pack_id == "openclaw"
-        ));
+        assert_eq!(state.screen, ScreenId::PackSelection);
+        assert!(matches!(actions.as_slice(), [AppAction::Render]));
     }
 
     #[test]
@@ -671,11 +658,8 @@ mod tests {
         );
 
         assert_eq!(state.request_draft.profile_id.as_deref(), Some("builder"));
-        assert!(state.auto_selected_profile);
-        assert!(matches!(
-            actions.as_slice(),
-            [AppAction::LoadMethods { pack_id }] if pack_id == "openclaw"
-        ));
+        assert_eq!(state.screen, ScreenId::ProfileSelection);
+        assert!(matches!(actions.as_slice(), [AppAction::Render]));
     }
 
     #[test]

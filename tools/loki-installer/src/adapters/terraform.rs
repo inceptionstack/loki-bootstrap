@@ -197,9 +197,29 @@ impl TerraformContext {
             .resolved_stack_name
             .clone()
             .unwrap_or_else(|| {
+                // 1. Try reading from existing terraform state
+                if let Some(name) = read_env_name_from_tf_state(&working_dir) {
+                    return name;
+                }
+                // 2. Try reading from .loki-env (persisted from previous install)
+                let env_file = Path::new(&working_dir).join(".loki-env");
+                if let Ok(contents) = fs::read_to_string(&env_file) {
+                    for line in contents.lines() {
+                        if let Some(name) = line.strip_prefix("ENVIRONMENT_NAME=") {
+                            let name = name.trim();
+                            if !name.is_empty() {
+                                return name.to_string();
+                            }
+                        }
+                    }
+                }
+                // 3. Generate a new unique name
                 let suffix = &uuid::Uuid::new_v4().to_string()[..8];
                 format!("loki-{}-{suffix}", plan.resolved_pack.id)
             });
+        // Persist environment name for future re-installs
+        let env_file = Path::new(&working_dir).join(".loki-env");
+        let _ = fs::write(&env_file, format!("ENVIRONMENT_NAME={environment_name}\n"));
 
         Ok(Self {
             terraform_bin,
@@ -240,6 +260,7 @@ async fn apply_terraform(
     }
 
     let mut artifacts = BTreeMap::new();
+    artifacts.insert("stack_name".into(), context.environment_name.clone());
 
     for step in &plan.deploy_steps {
         if phase_is_past(session.phase, step.phase) {
@@ -606,6 +627,37 @@ fn terraform_install_path() -> Result<PathBuf, AdapterError> {
         AdapterError::Message(format!("Failed to create directory {} — {e}", dir.display()))
     })?;
     Ok(dir.join("terraform"))
+}
+
+fn read_env_name_from_tf_state(working_dir: &str) -> Option<String> {
+    let state_path = Path::new(working_dir).join("terraform.tfstate");
+    let contents = fs::read_to_string(&state_path).ok()?;
+    // Look for environment_name in the state's root module outputs or resource attributes
+    // The IAM role name pattern is "${environment_name}-role"
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.contains("\"name\"") && line.contains("-role\"") {
+            // Extract name like "loki-openclaw-abc12345-role"
+            if let (Some(start), Some(end)) = (line.find('"'), line.rfind("-role\"")) {
+                let candidate = &line[start + 1..end];
+                if candidate.starts_with("loki-") {
+                    return Some(candidate.to_string());
+                }
+            }
+        }
+    }
+    // Fallback: try terraform output
+    let output = Command::new("terraform")
+        .args(["-chdir", working_dir, "output", "-raw", "environment_name"])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !name.is_empty() {
+            return Some(name);
+        }
+    }
+    None
 }
 
 fn can_write_to(dir: &Path) -> bool {

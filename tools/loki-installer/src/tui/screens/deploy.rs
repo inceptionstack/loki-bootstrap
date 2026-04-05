@@ -75,8 +75,10 @@ pub fn content_with_width(state: &AppState, max_width: usize) -> Text<'static> {
     for line in &state.deployment.logs[start..end] {
         // Truncate long lines to avoid horizontal overflow
         let max_line = max_width.saturating_sub(6);
-        let display = if line.len() > max_line {
-            format!(" - {}…", &line[..max_line])
+        let char_len: usize = line.chars().count();
+        let display = if char_len > max_line {
+            let truncated: String = line.chars().take(max_line).collect();
+            format!(" - {truncated}…")
         } else {
             format!(" - {line}")
         };

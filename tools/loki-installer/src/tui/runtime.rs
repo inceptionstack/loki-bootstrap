@@ -243,6 +243,7 @@ impl InstallEventSink for TuiEventSink {
                     .await
             }
             InstallEvent::ArtifactRecorded { key, value } => {
+                let value = value.lines().collect::<Vec<_>>().join(" ");
                 let display_value = if value.len() > 80 {
                     format!("{}…", &value[..80])
                 } else {
