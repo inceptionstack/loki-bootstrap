@@ -1,7 +1,7 @@
 //! Install plan generation, validation, and adapter dispatch.
 
 use crate::adapters::{NoopEventSink, adapter_for_method};
-use crate::core::doctor::{DoctorReport, run_doctor};
+use crate::core::doctor::{DoctorReport, RepoAvailabilityCheck, run_doctor};
 use crate::core::manifests::{ManifestError, ManifestRepository};
 use crate::core::session::{create_session, persist_session, session_path_for, session_path_hint};
 use crate::core::{
@@ -11,6 +11,7 @@ use crate::core::{
     ProfileManifest, SessionFormat, SessionPersistenceSpec,
 };
 use std::collections::BTreeMap;
+use std::path::Path;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PlannerError {
@@ -30,6 +31,12 @@ impl Planner {
     pub fn discover() -> Result<Self, PlannerError> {
         Ok(Self {
             repo: ManifestRepository::discover()?,
+        })
+    }
+
+    pub fn from_repo_root(root: impl AsRef<Path>) -> Result<Self, PlannerError> {
+        Ok(Self {
+            repo: ManifestRepository::from_root(root.as_ref().to_path_buf())?,
         })
     }
 
@@ -92,7 +99,10 @@ impl Planner {
                     InstallPhase::PostInstall,
                 ],
             },
-            adapter_options: merge_adapter_options(adapter_options, adapter_plan.adapter_options),
+            adapter_options: merge_adapter_options(
+                BTreeMap::from([("repo_root".into(), self.repo.root().display().to_string())]),
+                merge_adapter_options(adapter_options, adapter_plan.adapter_options),
+            ),
         };
         plan.validate_contract().map_err(PlannerError::Message)?;
 
@@ -102,12 +112,13 @@ impl Planner {
     pub fn run_doctor(
         &self,
         request: Option<&InstallRequest>,
+        repo_availability: RepoAvailabilityCheck,
     ) -> Result<DoctorReport, PlannerError> {
         let method = request
             .and_then(|req| req.method)
             .map(|method| self.repo.load_method(method))
             .transpose()?;
-        Ok(run_doctor(request, method.as_ref()))
+        Ok(run_doctor(request, method.as_ref(), repo_availability))
     }
 
     pub async fn start_install(&self, plan: InstallPlan) -> Result<InstallSession, PlannerError> {
@@ -211,6 +222,14 @@ impl Planner {
             .ok_or_else(|| PlannerError::Message("session missing deployment method".into()))?;
         let adapter = adapter_for_method(method);
         Ok(adapter.status(session).await?)
+    }
+
+    pub fn attach_repo_root(&self, session: &mut InstallSession) {
+        if let Some(plan) = &mut session.plan {
+            plan.adapter_options
+                .entry("repo_root".into())
+                .or_insert_with(|| self.repo.root().display().to_string());
+        }
     }
 
     fn resolve_profile(

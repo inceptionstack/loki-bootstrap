@@ -1,7 +1,7 @@
 //! CloudFormation deployment adapter.
 
 use crate::adapters::support::{
-    CommandOutput, CommandSpec, resolve_repo_path, run_command, spawn_child,
+    CommandOutput, CommandSpec, resolve_repo_path_from, run_command, spawn_child,
 };
 use crate::core::{
     AdapterError, AdapterPlan, AdapterValidationError, ApplyResult, DeployAction, DeployAdapter,
@@ -425,7 +425,10 @@ impl CloudFormationContext {
         Ok(Self {
             stack_name,
             region,
-            template_path: resolve_repo_path(&template_path)?,
+            template_path: resolve_repo_path_from(
+                plan.adapter_options.get("repo_root").map(String::as_str),
+                &template_path,
+            )?,
             capabilities,
             pack: plan.resolved_pack.id.clone(),
             profile: plan.resolved_profile.id.clone(),

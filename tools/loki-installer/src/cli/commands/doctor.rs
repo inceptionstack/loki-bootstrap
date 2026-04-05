@@ -2,12 +2,20 @@
 
 use crate::cli::args::DoctorArgs;
 use crate::cli::output::{doctor_result_json, print_human_line, print_json_line};
-use crate::core::Planner;
+use crate::core::{Planner, RepoAvailabilityCheck};
 use color_eyre::Result;
 
-pub async fn run(args: DoctorArgs, for_agent: bool) -> Result<()> {
-    let planner = Planner::discover()?;
-    let report = planner.run_doctor(args.to_request().as_ref())?;
+pub async fn run(
+    args: DoctorArgs,
+    for_agent: bool,
+    planner: Option<Planner>,
+    repo_availability: RepoAvailabilityCheck,
+) -> Result<()> {
+    let report = if let Some(planner) = planner {
+        planner.run_doctor(args.to_request().as_ref(), repo_availability)?
+    } else {
+        crate::core::run_doctor(args.to_request().as_ref(), None, repo_availability)
+    };
     if for_agent {
         print_json_line(&doctor_result_json(&report))?;
     } else if args.json {

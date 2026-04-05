@@ -8,8 +8,7 @@ use color_eyre::eyre::{Result, eyre};
 use std::io;
 use std::time::Instant;
 
-pub async fn run(args: InstallArgs, for_agent: bool) -> Result<()> {
-    let planner = Planner::discover()?;
+pub async fn run(args: InstallArgs, for_agent: bool, planner: Planner) -> Result<()> {
     let request = args.to_request();
 
     if request.mode == InstallMode::Interactive && !request.auto_yes {

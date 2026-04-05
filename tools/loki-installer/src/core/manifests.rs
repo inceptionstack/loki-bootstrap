@@ -37,16 +37,22 @@ impl ManifestRepository {
             path: ".".into(),
             source: err,
         })?;
+        Self::discover_from(&cwd)
+    }
 
-        for dir in cwd.ancestors() {
-            if dir.join("packs").is_dir() && dir.join("profiles").is_dir() {
-                return Ok(Self {
-                    root: dir.to_path_buf(),
-                });
-            }
+    pub fn discover_from(start: &Path) -> Result<Self, ManifestError> {
+        if let Some(root) = crate::core::detect_repo_root_from(start) {
+            return Ok(Self { root });
         }
+        Err(ManifestError::RepoRootNotFound(start.display().to_string()))
+    }
 
-        Err(ManifestError::RepoRootNotFound(cwd.display().to_string()))
+    pub fn from_root(root: impl Into<PathBuf>) -> Result<Self, ManifestError> {
+        let root = root.into();
+        if crate::core::is_repo_root(&root) {
+            return Ok(Self { root });
+        }
+        Err(ManifestError::RepoRootNotFound(root.display().to_string()))
     }
 
     pub fn root(&self) -> &Path {

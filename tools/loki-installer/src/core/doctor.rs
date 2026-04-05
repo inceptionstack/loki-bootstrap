@@ -4,6 +4,12 @@ use crate::core::{InstallRequest, MethodManifest, PrerequisiteCheck, Prerequisit
 use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone)]
+pub struct RepoAvailabilityCheck {
+    pub passed: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct DoctorCheckResult {
     pub check: PrerequisiteCheck,
     pub passed: bool,
@@ -27,6 +33,7 @@ impl DoctorReport {
 pub fn run_doctor(
     request: Option<&InstallRequest>,
     method: Option<&MethodManifest>,
+    repo_availability: RepoAvailabilityCheck,
 ) -> DoctorReport {
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
@@ -41,6 +48,20 @@ pub fn run_doctor(
     let network_hint = std::env::var("LOKI_INSTALLER_OFFLINE").is_err();
 
     let mut checks = vec![
+        DoctorCheckResult {
+            check: PrerequisiteCheck {
+                id: "repo_available".into(),
+                display_name: "Installer repo available".into(),
+                kind: PrerequisiteKind::BinaryDownloadable,
+                required: true,
+                remediation: Some(
+                    "Run with --repo-path or ensure the installer can clone the loki-agent repo."
+                        .into(),
+                ),
+            },
+            passed: repo_availability.passed,
+            message: repo_availability.message,
+        },
         DoctorCheckResult {
             check: PrerequisiteCheck {
                 id: "os_supported".into(),

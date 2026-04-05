@@ -5,8 +5,7 @@ use crate::cli::output::{plan_result_json, print_human_line, print_json_line};
 use crate::core::Planner;
 use color_eyre::eyre::{Result, eyre};
 
-pub async fn run(args: PlanArgs, for_agent: bool) -> Result<()> {
-    let planner = Planner::discover()?;
+pub async fn run(args: PlanArgs, for_agent: bool, planner: Planner) -> Result<()> {
     let request = args.install.to_request();
     if request.pack.is_empty() {
         return Err(eyre!("--pack is required for planning"));

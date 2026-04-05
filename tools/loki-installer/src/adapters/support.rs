@@ -61,10 +61,20 @@ pub(crate) fn spawn_child(spec: &CommandSpec) -> Result<tokio::process::Child, A
     })
 }
 
-pub(crate) fn resolve_repo_path(path: &str) -> Result<String, AdapterError> {
+pub(crate) fn resolve_repo_path_from(
+    repo_root: Option<&str>,
+    path: &str,
+) -> Result<String, AdapterError> {
     let candidate = PathBuf::from(path);
     if candidate.is_absolute() && candidate.exists() {
         return Ok(candidate.display().to_string());
+    }
+
+    if let Some(root) = repo_root {
+        let joined = Path::new(root).join(&candidate);
+        if joined.exists() {
+            return Ok(joined.display().to_string());
+        }
     }
 
     let cwd = std::env::current_dir().map_err(|source| {

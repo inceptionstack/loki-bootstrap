@@ -3,12 +3,16 @@
 use crate::core::{DeployMethodId, InstallMode, InstallRequest, InstallerEngine};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "loki-installer", about = "Loki Agent Installer V2")]
 pub struct Cli {
     #[arg(long, global = true)]
     pub for_agent: bool,
+
+    #[arg(long, global = true)]
+    pub repo_path: Option<PathBuf>,
 
     #[command(subcommand)]
     pub command: Command,
@@ -194,6 +198,8 @@ mod tests {
         let cli = Cli::parse_from([
             "loki-installer",
             "--for-agent",
+            "--repo-path",
+            "/tmp/loki-agent",
             "install",
             "--pack",
             "openclaw",
@@ -204,6 +210,10 @@ mod tests {
         ]);
 
         assert!(cli.for_agent);
+        assert_eq!(
+            cli.repo_path.as_deref(),
+            Some(std::path::Path::new("/tmp/loki-agent"))
+        );
 
         let Command::Install(args) = cli.command else {
             panic!("expected install command");

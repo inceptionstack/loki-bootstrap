@@ -6,6 +6,8 @@ fn parses_install_subcommand() {
     let cli = Cli::try_parse_from([
         "loki-installer",
         "--for-agent",
+        "--repo-path",
+        "/tmp/loki-agent",
         "install",
         "--pack",
         "openclaw",
@@ -23,6 +25,10 @@ fn parses_install_subcommand() {
     };
 
     assert!(cli.for_agent);
+    assert_eq!(
+        cli.repo_path.as_deref(),
+        Some(std::path::Path::new("/tmp/loki-agent"))
+    );
     assert_eq!(args.pack.as_deref(), Some("openclaw"));
     assert_eq!(args.method, Some(MethodArg::Cfn));
 }

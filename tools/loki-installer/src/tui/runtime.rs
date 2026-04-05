@@ -83,7 +83,18 @@ async fn run_actions(
                 pending.extend(update(state, InstallerEvent::MethodsLoaded(result)));
             }
             AppAction::RunDoctor => {
-                let report = planner.run_doctor(None).map_err(|e| e.to_string());
+                let report = planner
+                    .run_doctor(
+                        None,
+                        crate::core::RepoAvailabilityCheck {
+                            passed: true,
+                            message: format!(
+                                "repo available at {}",
+                                planner.repo().root().display()
+                            ),
+                        },
+                    )
+                    .map_err(|e| e.to_string());
                 pending.extend(update(state, InstallerEvent::DoctorCompleted(report)));
             }
             AppAction::BuildPlan => {

@@ -1,6 +1,6 @@
 //! Terraform deployment adapter.
 
-use crate::adapters::support::{CommandOutput, CommandSpec, resolve_repo_path, run_command};
+use crate::adapters::support::{CommandOutput, CommandSpec, resolve_repo_path_from, run_command};
 use crate::core::{
     AdapterError, AdapterPlan, AdapterValidationError, ApplyResult, DeployAction, DeployAdapter,
     DeployMethodId, DeployStatus, DeployStep, InstallEvent, InstallEventSink, InstallPhase,
@@ -187,7 +187,8 @@ impl DeployAdapter for TerraformAdapter {
 
 impl TerraformContext {
     fn from_plan(plan: &InstallPlan) -> Result<Self, AdapterError> {
-        let working_dir = resolve_repo_path(
+        let working_dir = resolve_repo_path_from(
+            plan.adapter_options.get("repo_root").map(String::as_str),
             plan.adapter_options
                 .get("working_dir")
                 .map(String::as_str)
@@ -377,7 +378,7 @@ fn adapter_option_to_tf_var(key: &str) -> Option<&'static str> {
         "sandbox_name" => Some("sandbox_name"),
         "telegram_token" => Some("telegram_token"),
         "allowed_chat_ids" => Some("allowed_chat_ids"),
-        "working_dir" | "pack" | "profile" | "region" | "workspace" => None,
+        "working_dir" | "pack" | "profile" | "region" | "workspace" | "repo_root" => None,
         _ => None,
     }
 }
