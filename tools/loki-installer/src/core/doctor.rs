@@ -1,5 +1,6 @@
 //! Lightweight environment checks surfaced by the doctor command and TUI.
 
+use crate::core::DeployMethodId;
 use crate::core::{InstallRequest, MethodManifest, PrerequisiteCheck, PrerequisiteKind};
 use chrono::{DateTime, Utc};
 
@@ -135,13 +136,19 @@ pub fn run_doctor(
 
     if let Some(method) = method {
         for tool in &method.required_tools {
+            let terraform_auto_install =
+                method.id == DeployMethodId::Terraform && tool == "terraform";
             checks.push(DoctorCheckResult {
                 check: PrerequisiteCheck {
                     id: format!("tool_{tool}"),
                     display_name: format!("{tool} present"),
                     kind: PrerequisiteKind::MethodToolingPresent,
-                    required: true,
-                    remediation: Some(format!("Install {tool} and ensure it is on PATH.")),
+                    required: !terraform_auto_install,
+                    remediation: Some(if terraform_auto_install {
+                        "Terraform will be auto-installed during deploy.".into()
+                    } else {
+                        format!("Install {tool} and ensure it is on PATH.")
+                    }),
                 },
                 passed: command_exists(tool),
                 message: format!("required by method {}", method.id),
@@ -173,4 +180,45 @@ fn command_exists(program: &str) -> bool {
     std::env::var_os("PATH")
         .map(|paths| std::env::split_paths(&paths).any(|path| path.join(program).exists()))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RepoAvailabilityCheck, run_doctor};
+    use crate::core::{DeployMethodId, MethodManifest};
+
+    #[test]
+    fn terraform_doctor_check_is_optional_when_terraform_is_missing() {
+        let method = MethodManifest {
+            schema_version: 1,
+            id: DeployMethodId::Terraform,
+            display_name: "Terraform".into(),
+            description: None,
+            requires_stack_name: false,
+            requires_region: false,
+            required_tools: vec!["terraform".into()],
+            supports_resume: true,
+            supports_uninstall: false,
+            input_schema: Default::default(),
+        };
+        let report = run_doctor(
+            None,
+            Some(&method),
+            RepoAvailabilityCheck {
+                passed: true,
+                message: "repo ok".into(),
+            },
+        );
+
+        let terraform_check = report
+            .checks
+            .iter()
+            .find(|check| check.check.id == "tool_terraform")
+            .expect("terraform doctor check");
+        assert!(!terraform_check.check.required);
+        assert_eq!(
+            terraform_check.check.remediation.as_deref(),
+            Some("Terraform will be auto-installed during deploy.")
+        );
+    }
 }

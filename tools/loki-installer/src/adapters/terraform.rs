@@ -12,12 +12,18 @@ use crate::core::{
 };
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub struct TerraformAdapter;
+const DEFAULT_TERRAFORM_VERSION: &str = "1.12.1";
+const TERRAFORM_PATH_ENV: &str = "PATH";
+const TERRAFORM_VERSION_ENV: &str = "LOKI_INSTALLER_TERRAFORM_VERSION";
 
 #[derive(Debug, Clone)]
 struct TerraformContext {
+    terraform_bin: String,
     working_dir: String,
     plan_file: String,
     region: String,
@@ -179,7 +185,7 @@ impl DeployAdapter for TerraformAdapter {
 }
 
 impl TerraformContext {
-    fn from_plan(plan: &InstallPlan) -> Result<Self, AdapterError> {
+    fn from_plan(plan: &InstallPlan, terraform_bin: String) -> Result<Self, AdapterError> {
         let working_dir = resolve_repo_path_from(
             plan.adapter_options.get("repo_root").map(String::as_str),
             plan.adapter_options
@@ -193,6 +199,7 @@ impl TerraformContext {
             .unwrap_or_else(|| format!("loki-{}", plan.resolved_pack.id));
 
         Ok(Self {
+            terraform_bin,
             plan_file: Path::new(&working_dir).join("tfplan").display().to_string(),
             working_dir,
             region: plan.resolved_region.clone(),
@@ -220,7 +227,8 @@ async fn apply_terraform(
         return Ok(completed_apply_result(plan, session));
     }
 
-    let context = TerraformContext::from_plan(plan)?;
+    let terraform_bin = ensure_terraform_installed(event_sink)?;
+    let context = TerraformContext::from_plan(plan, terraform_bin)?;
     if !Path::new(&context.working_dir).exists() {
         return Err(AdapterError::Message(format!(
             "Terraform working directory not found at {} — verify the repo checkout includes deploy/terraform",
@@ -247,8 +255,7 @@ async fn apply_terraform(
 
         match step.id.as_str() {
             "terraform-init" => {
-                let output =
-                    run_command(&build_terraform_init_command(&context.working_dir)).await?;
+                let output = run_command(&build_terraform_init_command(&context)).await?;
                 ensure_terraform_success(
                     &output,
                     "Terraform init failed — run terraform init manually in deploy/terraform for details",
@@ -262,16 +269,8 @@ async fn apply_terraform(
                 .await;
             }
             "terraform-plan" => {
-                let output = run_command(&build_terraform_plan_command(
-                    &context.working_dir,
-                    &context.plan_file,
-                    &context.region,
-                    &context.pack,
-                    &context.profile,
-                    &context.environment_name,
-                    &context.tf_vars,
-                ))
-                .await?;
+                let output =
+                    run_command(&build_terraform_plan_command(&context, &context.tf_vars)).await?;
                 ensure_terraform_success(
                     &output,
                     "Terraform plan failed — fix the reported variable or provider issue and retry",
@@ -285,11 +284,9 @@ async fn apply_terraform(
                 .await;
             }
             "terraform-apply" => {
-                let output = run_command_streaming(
-                    &build_terraform_apply_command(&context.working_dir, &context.plan_file),
-                    event_sink,
-                )
-                .await?;
+                let output =
+                    run_command_streaming(&build_terraform_apply_command(&context), event_sink)
+                        .await?;
                 let apply_output = if output.success() {
                     output
                 } else {
@@ -312,24 +309,12 @@ async fn apply_terraform(
                                     ),
                                 })
                                 .await;
-                            run_terraform_import(
-                                &context.working_dir,
-                                &resource_address,
-                                &import_id,
-                            )
-                            .await?;
+                            run_terraform_import(&context, &resource_address, &import_id).await?;
                         }
 
-                        let retry_plan = run_command(&build_terraform_plan_command(
-                            &context.working_dir,
-                            &context.plan_file,
-                            &context.region,
-                            &context.pack,
-                            &context.profile,
-                            &context.environment_name,
-                            &retry_tf_vars,
-                        ))
-                        .await?;
+                        let retry_plan =
+                            run_command(&build_terraform_plan_command(&context, &retry_tf_vars))
+                                .await?;
                         ensure_terraform_success(
                             &retry_plan,
                             "Terraform plan failed — fix the reported variable or provider issue and retry",
@@ -343,10 +328,7 @@ async fn apply_terraform(
                         .await;
 
                         let retry_apply = run_command_streaming(
-                            &build_terraform_apply_command(
-                                &context.working_dir,
-                                &context.plan_file,
-                            ),
+                            &build_terraform_apply_command(&context),
                             event_sink,
                         )
                         .await?;
@@ -372,8 +354,7 @@ async fn apply_terraform(
                 .await;
             }
             "terraform-health" => {
-                let output =
-                    run_command(&build_terraform_output_command(&context.working_dir)).await?;
+                let output = run_command(&build_terraform_output_command(&context)).await?;
                 ensure_terraform_success(
                     &output,
                     "Terraform output failed — run terraform output -json in deploy/terraform",
@@ -403,11 +384,11 @@ async fn apply_terraform(
     })
 }
 
-fn build_terraform_init_command(working_dir: &str) -> CommandSpec {
+fn build_terraform_init_command(context: &TerraformContext) -> CommandSpec {
     CommandSpec {
-        program: "terraform".into(),
+        program: context.terraform_bin.clone(),
         args: vec![
-            format!("-chdir={working_dir}"),
+            format!("-chdir={}", context.working_dir),
             "init".into(),
             "-no-color".into(),
             "-input=false".into(),
@@ -417,31 +398,26 @@ fn build_terraform_init_command(working_dir: &str) -> CommandSpec {
 }
 
 fn build_terraform_plan_command(
-    working_dir: &str,
-    plan_file: &str,
-    region: &str,
-    pack: &str,
-    profile: &str,
-    environment_name: &str,
+    context: &TerraformContext,
     tf_vars: &[(String, String)],
 ) -> CommandSpec {
     let mut args = vec![
-        format!("-chdir={working_dir}"),
+        format!("-chdir={}", context.working_dir),
         "plan".into(),
         "-no-color".into(),
         "-input=false".into(),
-        format!("-out={plan_file}"),
-        format!("-var=aws_region={region}"),
-        format!("-var=pack_name={pack}"),
-        format!("-var=profile_name={profile}"),
-        format!("-var=environment_name={environment_name}"),
+        format!("-out={}", context.plan_file),
+        format!("-var=aws_region={}", context.region),
+        format!("-var=pack_name={}", context.pack),
+        format!("-var=profile_name={}", context.profile),
+        format!("-var=environment_name={}", context.environment_name),
     ];
     for (name, value) in tf_vars {
         args.push(format!("-var={name}={value}"));
     }
 
     CommandSpec {
-        program: "terraform".into(),
+        program: context.terraform_bin.clone(),
         args,
         current_dir: None,
     }
@@ -462,16 +438,16 @@ fn adapter_option_to_tf_var(key: &str) -> Option<&'static str> {
     }
 }
 
-fn build_terraform_apply_command(working_dir: &str, plan_file: &str) -> CommandSpec {
+fn build_terraform_apply_command(context: &TerraformContext) -> CommandSpec {
     CommandSpec {
-        program: "terraform".into(),
+        program: context.terraform_bin.clone(),
         args: vec![
-            format!("-chdir={working_dir}"),
+            format!("-chdir={}", context.working_dir),
             "apply".into(),
             "-no-color".into(),
             "-input=false".into(),
             "-auto-approve".into(),
-            plan_file.into(),
+            context.plan_file.clone(),
         ],
         current_dir: None,
     }
@@ -487,11 +463,11 @@ fn with_tf_var(tf_vars: &[(String, String)], name: &str, value: &str) -> Vec<(St
     updated
 }
 
-fn build_terraform_output_command(working_dir: &str) -> CommandSpec {
+fn build_terraform_output_command(context: &TerraformContext) -> CommandSpec {
     CommandSpec {
-        program: "terraform".into(),
+        program: context.terraform_bin.clone(),
         args: vec![
-            format!("-chdir={working_dir}"),
+            format!("-chdir={}", context.working_dir),
             "output".into(),
             "-json".into(),
             "-no-color".into(),
@@ -501,14 +477,14 @@ fn build_terraform_output_command(working_dir: &str) -> CommandSpec {
 }
 
 fn build_terraform_import_command(
-    working_dir: &str,
+    context: &TerraformContext,
     resource_address: &str,
     import_id: &str,
 ) -> CommandSpec {
     CommandSpec {
-        program: "terraform".into(),
+        program: context.terraform_bin.clone(),
         args: vec![
-            format!("-chdir={working_dir}"),
+            format!("-chdir={}", context.working_dir),
             "import".into(),
             "-no-color".into(),
             resource_address.into(),
@@ -519,12 +495,12 @@ fn build_terraform_import_command(
 }
 
 async fn run_terraform_import(
-    working_dir: &str,
+    context: &TerraformContext,
     resource_address: &str,
     import_id: &str,
 ) -> Result<CommandOutput, AdapterError> {
     let output = run_command(&build_terraform_import_command(
-        working_dir,
+        context,
         resource_address,
         import_id,
     ))
@@ -534,6 +510,194 @@ async fn run_terraform_import(
         "Terraform import failed — inspect the Terraform output for the rejected AWS resource or permission",
     )?;
     Ok(output)
+}
+
+fn ensure_terraform_installed(
+    event_sink: &mut dyn InstallEventSink,
+) -> Result<String, AdapterError> {
+    if let Some(terraform_bin) = resolve_existing_terraform_binary() {
+        return Ok(terraform_bin);
+    }
+
+    emit_sync_log(event_sink, "Terraform not found — installing...")?;
+
+    let version = std::env::var(TERRAFORM_VERSION_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_TERRAFORM_VERSION.to_string());
+    let (os, arch) = terraform_platform()?;
+    let install_path = terraform_install_path()?;
+    if let Some(parent) = install_path.parent() {
+        fs::create_dir_all(parent).map_err(|source| {
+            AdapterError::Message(format!(
+                "Failed to create terraform install directory {} — {source}",
+                parent.display()
+            ))
+        })?;
+    }
+
+    let url = format!(
+        "https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{os}_{arch}.zip"
+    );
+    let archive_path = terraform_archive_path(&version);
+    download_terraform_archive(&url, &archive_path)?;
+    extract_terraform_binary(&archive_path, &install_path)?;
+    prepend_local_bin_to_path(install_path.parent())?;
+    emit_sync_log(
+        event_sink,
+        &format!("Terraform installed successfully (version {version})"),
+    )?;
+    let _ = fs::remove_file(&archive_path);
+
+    Ok(install_path.display().to_string())
+}
+
+fn resolve_existing_terraform_binary() -> Option<String> {
+    if let Some(path) = find_command_on_path("terraform")
+        && Command::new(&path)
+            .arg("version")
+            .status()
+            .is_ok_and(|status| status.success())
+    {
+        return Some(path.display().to_string());
+    }
+
+    None
+}
+
+fn terraform_platform() -> Result<(&'static str, &'static str), AdapterError> {
+    let os = match std::env::consts::OS {
+        "linux" => "linux",
+        "macos" => "darwin",
+        other => {
+            return Err(AdapterError::Message(format!(
+                "Terraform auto-install is unsupported on OS {other}"
+            )));
+        }
+    };
+
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        other => {
+            return Err(AdapterError::Message(format!(
+                "Terraform auto-install is unsupported on architecture {other}"
+            )));
+        }
+    };
+
+    Ok((os, arch))
+}
+
+fn terraform_install_path() -> Result<PathBuf, AdapterError> {
+    let home = std::env::var_os("HOME").ok_or_else(|| {
+        AdapterError::Message(
+            "HOME is not set, so the installer cannot place terraform in ~/.local/bin".into(),
+        )
+    })?;
+    Ok(PathBuf::from(home).join(".local/bin/terraform"))
+}
+
+fn terraform_archive_path(version: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "loki-installer-terraform-{version}-{}.zip",
+        std::process::id()
+    ))
+}
+
+fn download_terraform_archive(url: &str, archive_path: &Path) -> Result<(), AdapterError> {
+    let output = Command::new("curl")
+        .args(["-fsSL", url, "-o"])
+        .arg(archive_path)
+        .output()
+        .map_err(|source| {
+            AdapterError::Message(format!(
+                "Failed to start curl while downloading terraform from {url} — {source}"
+            ))
+        })?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(AdapterError::Message(format!(
+        "Failed to download terraform archive from {url} — {stderr}"
+    )))
+}
+
+fn extract_terraform_binary(archive_path: &Path, install_path: &Path) -> Result<(), AdapterError> {
+    let output = Command::new("python3")
+        .arg("-c")
+        .arg(
+            "import os, shutil, sys, zipfile\n\
+with zipfile.ZipFile(sys.argv[1]) as archive:\n\
+    with archive.open('terraform') as src, open(sys.argv[2], 'wb') as dst:\n\
+        shutil.copyfileobj(src, dst)\n\
+os.chmod(sys.argv[2], 0o755)\n",
+        )
+        .arg(archive_path)
+        .arg(install_path)
+        .output()
+        .map_err(|source| {
+            AdapterError::Message(format!(
+                "Failed to start python3 while extracting terraform to {} — {source}",
+                install_path.display()
+            ))
+        })?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(AdapterError::Message(format!(
+        "Failed to extract terraform binary to {} — {stderr}",
+        install_path.display()
+    )))
+}
+
+fn find_command_on_path(program: &str) -> Option<PathBuf> {
+    std::env::var_os(TERRAFORM_PATH_ENV).and_then(|paths| {
+        std::env::split_paths(&paths).find_map(|path| {
+            let candidate = path.join(program);
+            if candidate.is_file() {
+                Some(candidate)
+            } else {
+                None
+            }
+        })
+    })
+}
+
+fn prepend_local_bin_to_path(local_bin_dir: Option<&Path>) -> Result<(), AdapterError> {
+    let Some(local_bin_dir) = local_bin_dir else {
+        return Ok(());
+    };
+
+    let current_path = std::env::var_os(TERRAFORM_PATH_ENV).unwrap_or_default();
+    let mut paths: Vec<PathBuf> = std::env::split_paths(&current_path).collect();
+    if paths.iter().any(|path| path == local_bin_dir) {
+        return Ok(());
+    }
+
+    paths.insert(0, local_bin_dir.to_path_buf());
+    let joined = std::env::join_paths(paths).map_err(|source| {
+        AdapterError::Message(format!(
+            "Failed to update PATH for terraform install — {source}"
+        ))
+    })?;
+    // Safety: the installer updates PATH within its own process so subsequent child processes can
+    // discover the freshly installed terraform binary.
+    unsafe {
+        std::env::set_var(TERRAFORM_PATH_ENV, joined);
+    }
+    Ok(())
+}
+
+fn emit_sync_log(event_sink: &mut dyn InstallEventSink, message: &str) -> Result<(), AdapterError> {
+    futures::executor::block_on(event_sink.emit(InstallEvent::LogLine {
+        message: message.to_string(),
+    }));
+    Ok(())
 }
 
 fn parse_existing_resources(stderr: &str) -> Vec<(String, String)> {
@@ -762,16 +926,29 @@ fn completed_apply_result(plan: &InstallPlan, session: &InstallSession) -> Apply
 #[cfg(test)]
 mod tests {
     use super::{
-        adapter_option_to_tf_var, build_terraform_apply_command, build_terraform_import_command,
-        build_terraform_init_command, build_terraform_plan_command, parse_existing_resources,
-        parse_terraform_outputs, phase_is_past,
+        TerraformContext, adapter_option_to_tf_var, build_terraform_apply_command,
+        build_terraform_import_command, build_terraform_init_command, build_terraform_plan_command,
+        parse_existing_resources, parse_terraform_outputs, phase_is_past,
     };
     use crate::core::InstallPhase;
 
+    fn test_context() -> TerraformContext {
+        TerraformContext {
+            terraform_bin: "/usr/local/bin/terraform".into(),
+            working_dir: "/tmp/repo/deploy/terraform".into(),
+            plan_file: "/tmp/repo/tfplan".into(),
+            region: "us-east-1".into(),
+            pack: "openclaw".into(),
+            profile: "builder".into(),
+            environment_name: "loki-openclaw".into(),
+            tf_vars: Vec::new(),
+        }
+    }
+
     #[test]
     fn terraform_init_command_uses_working_dir_and_non_interactive_flags() {
-        let command = build_terraform_init_command("/tmp/repo/deploy/terraform");
-        assert_eq!(command.program, "terraform");
+        let command = build_terraform_init_command(&test_context());
+        assert_eq!(command.program, "/usr/local/bin/terraform");
         assert_eq!(
             command.args,
             vec![
@@ -786,12 +963,7 @@ mod tests {
     #[test]
     fn terraform_plan_command_includes_outfile_and_tf_vars() {
         let command = build_terraform_plan_command(
-            "/tmp/repo/deploy/terraform",
-            "/tmp/repo/deploy/terraform/tfplan",
-            "us-east-1",
-            "openclaw",
-            "builder",
-            "loki-openclaw",
+            &test_context(),
             &[
                 (
                     "default_model".into(),
@@ -805,15 +977,11 @@ mod tests {
                 ),
             ],
         );
-        assert_eq!(command.program, "terraform");
+        assert_eq!(command.program, "/usr/local/bin/terraform");
         assert!(command.args.contains(&"plan".into()));
         assert!(command.args.contains(&"-no-color".into()));
         assert!(command.args.contains(&"-input=false".into()));
-        assert!(
-            command
-                .args
-                .contains(&"-out=/tmp/repo/deploy/terraform/tfplan".into())
-        );
+        assert!(command.args.contains(&"-out=/tmp/repo/tfplan".into()));
         assert!(command.args.contains(&"-var=aws_region=us-east-1".into()));
         assert!(command.args.contains(&"-var=pack_name=openclaw".into()));
         assert!(command.args.contains(&"-var=profile_name=builder".into()));
@@ -865,9 +1033,8 @@ mod tests {
 
     #[test]
     fn terraform_apply_command_uses_saved_plan() {
-        let command =
-            build_terraform_apply_command("/tmp/repo/deploy/terraform", "/tmp/repo/tfplan");
-        assert_eq!(command.program, "terraform");
+        let command = build_terraform_apply_command(&test_context());
+        assert_eq!(command.program, "/usr/local/bin/terraform");
         assert_eq!(
             command.args,
             vec![
@@ -884,11 +1051,11 @@ mod tests {
     #[test]
     fn terraform_import_command_uses_working_dir_and_resource_details() {
         let command = build_terraform_import_command(
-            "/tmp/repo/deploy/terraform",
+            &test_context(),
             "aws_iam_role.instance",
             "loki-instance-role",
         );
-        assert_eq!(command.program, "terraform");
+        assert_eq!(command.program, "/usr/local/bin/terraform");
         assert_eq!(
             command.args,
             vec![
