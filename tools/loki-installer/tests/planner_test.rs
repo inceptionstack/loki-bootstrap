@@ -50,6 +50,20 @@ async fn planner_applies_method_defaults_and_omits_stack_name_for_terraform() {
         plan.adapter_options.get("workspace").map(String::as_str),
         Some("default")
     );
+    assert_eq!(
+        plan.deploy_steps
+            .iter()
+            .map(|step| step.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "terraform-init",
+            "terraform-plan",
+            "terraform-apply",
+            "terraform-health",
+            "bootstrap-wait",
+            "ssm-session-doc",
+        ]
+    );
 }
 
 #[tokio::test]

@@ -15,11 +15,16 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 pub struct TerraformAdapter;
 const DEFAULT_TERRAFORM_VERSION: &str = "1.12.1";
+const TERRAFORM_PLUGIN_CACHE_DIR: &str = "/tmp/terraform-plugin-cache";
+const SSM_SESSION_DOCUMENT_NAME: &str = "Loki-Session";
 const TERRAFORM_PATH_ENV: &str = "PATH";
 const TERRAFORM_VERSION_ENV: &str = "LOKI_INSTALLER_TERRAFORM_VERSION";
+const BOOTSTRAP_POLL_ATTEMPTS: u32 = 60;
+const BOOTSTRAP_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone)]
 struct TerraformContext {
@@ -115,6 +120,18 @@ impl DeployAdapter for TerraformAdapter {
                     display_name: "Capture Terraform outputs".into(),
                     action: DeployAction::VerifyInstanceHealth,
                 },
+                DeployStep {
+                    id: "bootstrap-wait".into(),
+                    phase: InstallPhase::PostInstall,
+                    display_name: "Wait for instance bootstrap".into(),
+                    action: DeployAction::VerifyInstanceHealth,
+                },
+                DeployStep {
+                    id: "ssm-session-doc".into(),
+                    phase: InstallPhase::PostInstall,
+                    display_name: "Ensure SSM session document".into(),
+                    action: DeployAction::EmitInstructions,
+                },
             ],
             adapter_options,
             warnings: vec![PlanWarning {
@@ -193,30 +210,27 @@ impl TerraformContext {
                 .map(String::as_str)
                 .unwrap_or("deploy/terraform"),
         )?;
-        let environment_name = plan
-            .resolved_stack_name
-            .clone()
-            .unwrap_or_else(|| {
-                // 1. Try reading from existing terraform state
-                if let Some(name) = read_env_name_from_tf_state(&working_dir) {
-                    return name;
-                }
-                // 2. Try reading from .loki-env (persisted from previous install)
-                let env_file = Path::new(&working_dir).join(".loki-env");
-                if let Ok(contents) = fs::read_to_string(&env_file) {
-                    for line in contents.lines() {
-                        if let Some(name) = line.strip_prefix("ENVIRONMENT_NAME=") {
-                            let name = name.trim();
-                            if !name.is_empty() {
-                                return name.to_string();
-                            }
+        let environment_name = plan.resolved_stack_name.clone().unwrap_or_else(|| {
+            // 1. Try reading from existing terraform state
+            if let Some(name) = read_env_name_from_tf_state(&working_dir) {
+                return name;
+            }
+            // 2. Try reading from .loki-env (persisted from previous install)
+            let env_file = Path::new(&working_dir).join(".loki-env");
+            if let Ok(contents) = fs::read_to_string(&env_file) {
+                for line in contents.lines() {
+                    if let Some(name) = line.strip_prefix("ENVIRONMENT_NAME=") {
+                        let name = name.trim();
+                        if !name.is_empty() {
+                            return name.to_string();
                         }
                     }
                 }
-                // 3. Generate a new unique name
-                let suffix = &uuid::Uuid::new_v4().to_string()[..8];
-                format!("loki-{}-{suffix}", plan.resolved_pack.id)
-            });
+            }
+            // 3. Generate a new unique name
+            let suffix = &uuid::Uuid::new_v4().to_string()[..8];
+            format!("loki-{}-{suffix}", plan.resolved_pack.id)
+        });
         // Persist environment name for future re-installs
         let env_file = Path::new(&working_dir).join(".loki-env");
         let _ = fs::write(&env_file, format!("ENVIRONMENT_NAME={environment_name}\n"));
@@ -251,7 +265,7 @@ async fn apply_terraform(
     }
 
     let terraform_bin = ensure_terraform_installed(event_sink)?;
-    let context = TerraformContext::from_plan(plan, terraform_bin)?;
+    let mut context = TerraformContext::from_plan(plan, terraform_bin)?;
     if !Path::new(&context.working_dir).exists() {
         return Err(AdapterError::Message(format!(
             "Terraform working directory not found at {} — verify the repo checkout includes deploy/terraform",
@@ -279,6 +293,7 @@ async fn apply_terraform(
 
         match step.id.as_str() {
             "terraform-init" => {
+                prepare_terraform_init_context(&mut context, event_sink).await?;
                 let output = run_command(&build_terraform_init_command(&context)).await?;
                 ensure_terraform_success(
                     &output,
@@ -392,6 +407,13 @@ async fn apply_terraform(
                 artifacts.insert("stack_status".into(), "terraform_applied".into());
                 artifacts.insert("instance_health".into(), "unknown".into());
             }
+            "bootstrap-wait" => {
+                wait_for_bootstrap(&context, &artifacts, event_sink).await?;
+                artifacts.insert("instance_health".into(), "ready".into());
+            }
+            "ssm-session-doc" => {
+                ensure_ssm_session_document(&context.region, &mut artifacts, event_sink).await;
+            }
             _ => {}
         }
 
@@ -418,6 +440,7 @@ fn build_terraform_init_command(context: &TerraformContext) -> CommandSpec {
             "-input=false".into(),
         ],
         current_dir: None,
+        env: terraform_init_env(),
     }
 }
 
@@ -444,6 +467,7 @@ fn build_terraform_plan_command(
         program: context.terraform_bin.clone(),
         args,
         current_dir: None,
+        env: BTreeMap::new(),
     }
 }
 
@@ -474,6 +498,7 @@ fn build_terraform_apply_command(context: &TerraformContext) -> CommandSpec {
             context.plan_file.clone(),
         ],
         current_dir: None,
+        env: BTreeMap::new(),
     }
 }
 
@@ -497,6 +522,7 @@ fn build_terraform_output_command(context: &TerraformContext) -> CommandSpec {
             "-no-color".into(),
         ],
         current_dir: None,
+        env: BTreeMap::new(),
     }
 }
 
@@ -515,7 +541,129 @@ fn build_terraform_import_command(
             import_id.into(),
         ],
         current_dir: None,
+        env: BTreeMap::new(),
     }
+}
+
+fn terraform_init_env() -> BTreeMap<String, String> {
+    BTreeMap::from([(
+        "TF_PLUGIN_CACHE_DIR".into(),
+        TERRAFORM_PLUGIN_CACHE_DIR.into(),
+    )])
+}
+
+async fn prepare_terraform_init_context(
+    context: &mut TerraformContext,
+    event_sink: &mut dyn InstallEventSink,
+) -> Result<(), AdapterError> {
+    fs::create_dir_all(TERRAFORM_PLUGIN_CACHE_DIR).map_err(|source| {
+        AdapterError::Message(format!(
+            "Failed to create terraform plugin cache directory {TERRAFORM_PLUGIN_CACHE_DIR} — {source}"
+        ))
+    })?;
+
+    if let Some(available_mb) = available_disk_space_mb(Path::new(&context.working_dir))?
+        && available_mb < 600
+    {
+        emit_sync_log(
+            event_sink,
+            &format!(
+                "Low disk space ({available_mb}MB available) — Terraform providers need ~500MB"
+            ),
+        )?;
+        if is_cloudshell() {
+            emit_sync_log(
+                event_sink,
+                "CloudShell detected — moving Terraform workdir to /tmp",
+            )?;
+            relocate_terraform_workdir_to_tmp(context)?;
+            emit_sync_log(
+                event_sink,
+                &format!("Working from: {}", context.working_dir),
+            )?;
+        } else {
+            emit_sync_log(
+                event_sink,
+                "You may run out of disk space. Consider freeing space or using /tmp.",
+            )?;
+        }
+    }
+
+    emit_sync_log(
+        event_sink,
+        &format!("Plugin cache: {TERRAFORM_PLUGIN_CACHE_DIR}"),
+    )?;
+    Ok(())
+}
+
+fn available_disk_space_mb(path: &Path) -> Result<Option<u64>, AdapterError> {
+    let output = Command::new("df")
+        .args(["-Pm"])
+        .arg(path)
+        .output()
+        .map_err(|source| {
+            AdapterError::Message(format!(
+                "Failed to check available disk space for {} — {source}",
+                path.display()
+            ))
+        })?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    Ok(parse_df_available_mb(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+fn parse_df_available_mb(raw: &str) -> Option<u64> {
+    raw.lines()
+        .nth(1)
+        .and_then(|line| line.split_whitespace().nth(3))
+        .and_then(|value| value.parse::<u64>().ok())
+}
+
+fn is_cloudshell() -> bool {
+    std::env::var_os("AWS_CLOUDSHELL_HOME").is_some()
+        || std::env::var("AWS_EXECUTION_ENV")
+            .map(|value| value.contains("CloudShell"))
+            .unwrap_or(false)
+        || std::env::var("USER")
+            .map(|value| value == "cloudshell-user")
+            .unwrap_or(false)
+}
+
+fn relocate_terraform_workdir_to_tmp(context: &mut TerraformContext) -> Result<(), AdapterError> {
+    let relocated_dir = std::env::temp_dir().join(format!("loki-terraform-{}", std::process::id()));
+    fs::create_dir_all(&relocated_dir).map_err(|source| {
+        AdapterError::Message(format!(
+            "Failed to create temporary terraform workdir {} — {source}",
+            relocated_dir.display()
+        ))
+    })?;
+
+    let output = Command::new("cp")
+        .args(["-a"])
+        .arg(format!("{}/.", context.working_dir))
+        .arg(&relocated_dir)
+        .output()
+        .map_err(|source| {
+            AdapterError::Message(format!(
+                "Failed to copy terraform workdir to {} — {source}",
+                relocated_dir.display()
+            ))
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(AdapterError::Message(format!(
+            "Failed to copy terraform workdir to {} — {stderr}",
+            relocated_dir.display()
+        )));
+    }
+
+    context.working_dir = relocated_dir.display().to_string();
+    context.plan_file = relocated_dir.join("tfplan").display().to_string();
+    Ok(())
 }
 
 async fn run_terraform_import(
@@ -622,9 +770,16 @@ fn terraform_install_path() -> Result<PathBuf, AdapterError> {
     let primary = PathBuf::from(&home).join(".local/bin");
     // Fall back to /tmp/.local/bin when ~/.local/bin is on a read-only or
     // space-constrained filesystem (e.g. CloudShell).
-    let dir = if can_write_to(&primary) { primary } else { PathBuf::from("/tmp/.local/bin") };
+    let dir = if can_write_to(&primary) {
+        primary
+    } else {
+        PathBuf::from("/tmp/.local/bin")
+    };
     fs::create_dir_all(&dir).map_err(|e| {
-        AdapterError::Message(format!("Failed to create directory {} — {e}", dir.display()))
+        AdapterError::Message(format!(
+            "Failed to create directory {} — {e}",
+            dir.display()
+        ))
     })?;
     Ok(dir.join("terraform"))
 }
@@ -666,7 +821,10 @@ fn can_write_to(dir: &Path) -> bool {
     }
     let probe = dir.join(".loki-probe");
     match fs::write(&probe, b"ok") {
-        Ok(_) => { let _ = fs::remove_file(&probe); true }
+        Ok(_) => {
+            let _ = fs::remove_file(&probe);
+            true
+        }
         Err(_) => false,
     }
 }
@@ -726,7 +884,9 @@ fn extract_terraform_binary(archive_path: &Path, install_path: &Path) -> Result<
     {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(install_path)
-            .map_err(|e| AdapterError::Message(format!("Failed to read terraform permissions — {e}")))?
+            .map_err(|e| {
+                AdapterError::Message(format!("Failed to read terraform permissions — {e}"))
+            })?
             .permissions();
         perms.set_mode(0o755);
         fs::set_permissions(install_path, perms)
@@ -778,6 +938,271 @@ fn emit_sync_log(event_sink: &mut dyn InstallEventSink, message: &str) -> Result
         message: message.to_string(),
     }));
     Ok(())
+}
+
+async fn wait_for_bootstrap(
+    context: &TerraformContext,
+    artifacts: &BTreeMap<String, String>,
+    event_sink: &mut dyn InstallEventSink,
+) -> Result<(), AdapterError> {
+    let instance_id = artifacts.get("instance_id").cloned().ok_or_else(|| {
+        AdapterError::Message("Terraform output did not include instance_id".into())
+    })?;
+
+    emit_sync_log(event_sink, "Waiting for Loki to bootstrap (~10 minutes)...")?;
+    if let Some(public_ip) = artifacts.get("public_ip") {
+        emit_sync_log(
+            event_sink,
+            &format!("Instance: {instance_id} | IP: {public_ip}"),
+        )?;
+    } else {
+        emit_sync_log(event_sink, &format!("Instance: {instance_id}"))?;
+    }
+
+    for parameter in ["/loki/setup-status", "/loki/setup-step", "/loki/setup-log"] {
+        let _ = run_command(&aws_ssm_command(
+            &context.region,
+            &["delete-parameter", "--name", parameter],
+        ))
+        .await;
+    }
+
+    for attempt in 1..=BOOTSTRAP_POLL_ATTEMPTS {
+        let setup_status = get_ssm_parameter(&context.region, "/loki/setup-status").await?;
+        if setup_status.as_deref() == Some("FAILED") {
+            let failed_step = get_ssm_parameter(&context.region, "/loki/setup-step")
+                .await?
+                .unwrap_or_else(|| "unknown step".into());
+            let fail_log = get_ssm_parameter(&context.region, "/loki/setup-log")
+                .await?
+                .unwrap_or_default();
+
+            emit_sync_log(event_sink, "Bootstrap FAILED")?;
+            emit_sync_log(event_sink, &format!("Step: {failed_step}"))?;
+            if !fail_log.is_empty() {
+                emit_sync_log(event_sink, "Last log output:")?;
+                for line in fail_log.lines() {
+                    emit_sync_log(event_sink, &format!("  {line}"))?;
+                }
+            }
+            return Err(AdapterError::Message(format!(
+                "Bootstrap failed during {failed_step}"
+            )));
+        }
+
+        if bootstrap_done(&context.region, &instance_id).await? {
+            emit_sync_log(event_sink, "Loki is ready!")?;
+            return Ok(());
+        }
+
+        if let Some(current_step) = get_ssm_parameter(&context.region, "/loki/setup-step").await?
+            && !current_step.is_empty()
+        {
+            emit_sync_log(
+                event_sink,
+                &format!("Bootstrapping: {current_step} ({attempt}/{BOOTSTRAP_POLL_ATTEMPTS})"),
+            )?;
+        }
+
+        if attempt < BOOTSTRAP_POLL_ATTEMPTS {
+            tokio::time::sleep(BOOTSTRAP_POLL_INTERVAL).await;
+        }
+    }
+
+    Err(AdapterError::Message(
+        "Timed out waiting for bootstrap to finish after 10 minutes".into(),
+    ))
+}
+
+async fn bootstrap_done(region: &str, instance_id: &str) -> Result<bool, AdapterError> {
+    let Some(command_id) = send_ssm_shell_command(
+        region,
+        instance_id,
+        "test -f /tmp/loki-bootstrap-done && echo READY || echo WAITING",
+    )
+    .await?
+    else {
+        return Ok(false);
+    };
+
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let output = get_ssm_command_output(region, instance_id, &command_id).await?;
+    Ok(output.contains("READY"))
+}
+
+async fn ensure_ssm_session_document(
+    region: &str,
+    artifacts: &mut BTreeMap<String, String>,
+    event_sink: &mut dyn InstallEventSink,
+) {
+    match ssm_session_document_exists(region).await {
+        Ok(true) => {
+            artifacts.insert(
+                "ssm_session_document".into(),
+                SSM_SESSION_DOCUMENT_NAME.into(),
+            );
+            let _ = emit_sync_log(
+                event_sink,
+                &format!("SSM session document ready: {SSM_SESSION_DOCUMENT_NAME}"),
+            );
+        }
+        Ok(false) => match create_ssm_session_document(region).await {
+            Ok(()) => {
+                artifacts.insert(
+                    "ssm_session_document".into(),
+                    SSM_SESSION_DOCUMENT_NAME.into(),
+                );
+                let _ = emit_sync_log(
+                    event_sink,
+                    &format!("Created SSM session document: {SSM_SESSION_DOCUMENT_NAME}"),
+                );
+            }
+            Err(err) => {
+                let _ = emit_sync_log(
+                    event_sink,
+                    &format!(
+                        "Warning: could not create {SSM_SESSION_DOCUMENT_NAME} SSM document ({err})"
+                    ),
+                );
+            }
+        },
+        Err(err) => {
+            let _ = emit_sync_log(
+                event_sink,
+                &format!(
+                    "Warning: could not verify {SSM_SESSION_DOCUMENT_NAME} SSM document ({err})"
+                ),
+            );
+        }
+    }
+}
+
+async fn ssm_session_document_exists(region: &str) -> Result<bool, AdapterError> {
+    let output = run_command(&aws_ssm_command(
+        region,
+        &["describe-document", "--name", SSM_SESSION_DOCUMENT_NAME],
+    ))
+    .await?;
+    Ok(output.success())
+}
+
+async fn create_ssm_session_document(region: &str) -> Result<(), AdapterError> {
+    let output = run_command(&aws_ssm_command(
+        region,
+        &[
+            "create-document",
+            "--name",
+            SSM_SESSION_DOCUMENT_NAME,
+            "--document-type",
+            "Session",
+            "--content",
+            r#"{"schemaVersion":"1.0","description":"SSM session for Loki - starts as ec2-user","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ && exec bash --login"}}}"#,
+        ],
+    ))
+    .await?;
+    if output.success() {
+        Ok(())
+    } else {
+        let detail = if !output.stderr.trim().is_empty() {
+            output.stderr
+        } else {
+            output.stdout
+        };
+        Err(AdapterError::Message(detail))
+    }
+}
+
+async fn get_ssm_parameter(region: &str, name: &str) -> Result<Option<String>, AdapterError> {
+    let output = run_command(&aws_ssm_command(
+        region,
+        &[
+            "get-parameter",
+            "--name",
+            name,
+            "--query",
+            "Parameter.Value",
+            "--output",
+            "text",
+        ],
+    ))
+    .await?;
+    if output.success() {
+        let value = output.stdout.trim().to_string();
+        return Ok((!value.is_empty()).then_some(value));
+    }
+    Ok(None)
+}
+
+async fn send_ssm_shell_command(
+    region: &str,
+    instance_id: &str,
+    shell_command: &str,
+) -> Result<Option<String>, AdapterError> {
+    let parameters = format!(r#"commands=["{shell_command}"]"#);
+    let output = run_command(&aws_ssm_command(
+        region,
+        &[
+            "send-command",
+            "--instance-ids",
+            instance_id,
+            "--document-name",
+            "AWS-RunShellScript",
+            "--parameters",
+            &parameters,
+            "--query",
+            "Command.CommandId",
+            "--output",
+            "text",
+        ],
+    ))
+    .await?;
+    if output.success() {
+        let value = output.stdout.trim().to_string();
+        Ok((!value.is_empty()).then_some(value))
+    } else {
+        Ok(None)
+    }
+}
+
+async fn get_ssm_command_output(
+    region: &str,
+    instance_id: &str,
+    command_id: &str,
+) -> Result<String, AdapterError> {
+    let output = run_command(&aws_ssm_command(
+        region,
+        &[
+            "get-command-invocation",
+            "--command-id",
+            command_id,
+            "--instance-id",
+            instance_id,
+            "--query",
+            "StandardOutputContent",
+            "--output",
+            "text",
+        ],
+    ))
+    .await?;
+    if output.success() {
+        Ok(output.stdout)
+    } else {
+        Ok(String::new())
+    }
+}
+
+fn aws_ssm_command(region: &str, args: &[&str]) -> CommandSpec {
+    let mut full_args = args
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect::<Vec<_>>();
+    full_args.extend(["--region".into(), region.into()]);
+    CommandSpec {
+        program: "aws".into(),
+        args: full_args,
+        current_dir: None,
+        env: BTreeMap::new(),
+    }
 }
 
 fn parse_existing_resources(stderr: &str) -> Vec<(String, String)> {
@@ -1008,7 +1433,8 @@ mod tests {
     use super::{
         TerraformContext, adapter_option_to_tf_var, build_terraform_apply_command,
         build_terraform_import_command, build_terraform_init_command, build_terraform_plan_command,
-        parse_existing_resources, parse_terraform_outputs, phase_is_past,
+        parse_df_available_mb, parse_existing_resources, parse_terraform_outputs, phase_is_past,
+        terraform_init_env,
     };
     use crate::core::InstallPhase;
 
@@ -1037,6 +1463,10 @@ mod tests {
                 "-no-color",
                 "-input=false",
             ]
+        );
+        assert_eq!(
+            command.env.get("TF_PLUGIN_CACHE_DIR").map(String::as_str),
+            Some("/tmp/terraform-plugin-cache")
         );
     }
 
@@ -1182,6 +1612,21 @@ mod tests {
         assert_eq!(artifacts.get("instance_id"), Some(&"i-123".into()));
         assert_eq!(artifacts.get("public_ip"), Some(&"1.2.3.4".into()));
         assert!(artifacts.get("terraform_output_json").is_some());
+    }
+
+    #[test]
+    fn parse_df_available_mb_reads_available_column() {
+        let output = "Filesystem 1048576-blocks Used Available Capacity Mounted on\n/dev/root 1000 450 550 45% /";
+        assert_eq!(parse_df_available_mb(output), Some(550));
+    }
+
+    #[test]
+    fn terraform_init_env_sets_plugin_cache_dir() {
+        let env = terraform_init_env();
+        assert_eq!(
+            env.get("TF_PLUGIN_CACHE_DIR").map(String::as_str),
+            Some("/tmp/terraform-plugin-cache")
+        );
     }
 
     #[test]

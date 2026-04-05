@@ -608,6 +608,7 @@ async fn stage_cloudformation_template(
             "--region".into(), context.region.clone(),
         ],
         current_dir: None,
+        env: BTreeMap::new(),
     }).await;
 
     // Enable SSE-S3 encryption
@@ -625,6 +626,7 @@ async fn stage_cloudformation_template(
             context.region.clone(),
         ],
         current_dir: None,
+        env: BTreeMap::new(),
     })
     .await;
 
@@ -815,6 +817,7 @@ fn build_validate_identity_command(region: Option<&str>) -> CommandSpec {
         program: "aws".into(),
         args,
         current_dir: None,
+        env: BTreeMap::new(),
     }
 }
 
@@ -832,6 +835,7 @@ fn build_describe_stack_command(stack_name: &str, region: &str) -> CommandSpec {
             region.into(),
         ],
         current_dir: None,
+        env: BTreeMap::new(),
     }
 }
 
@@ -849,6 +853,7 @@ fn build_describe_stack_events_command(stack_name: &str, region: &str) -> Comman
             region.into(),
         ],
         current_dir: None,
+        env: BTreeMap::new(),
     }
 }
 
@@ -892,6 +897,7 @@ fn build_apply_stack_command(input: ApplyStackCommandInput<'_>) -> CommandSpec {
         program: "aws".into(),
         args,
         current_dir: None,
+        env: BTreeMap::new(),
     }
 }
 
@@ -914,6 +920,7 @@ fn build_create_bucket_command(bucket: &str, region: &str) -> CommandSpec {
         program: "aws".into(),
         args,
         current_dir: None,
+        env: BTreeMap::new(),
     }
 }
 
@@ -934,6 +941,7 @@ fn build_upload_template_command(
             region.into(),
         ],
         current_dir: None,
+        env: BTreeMap::new(),
     }
 }
 
@@ -995,6 +1003,7 @@ fn build_wait_stack_command(stack_name: &str, region: &str, waiter: WaiterKind) 
             region.into(),
         ],
         current_dir: None,
+        env: BTreeMap::new(),
     }
 }
 

@@ -41,6 +41,18 @@ pub fn content(state: &AppState) -> Text<'static> {
         .cloned()
         .unwrap_or_else(|| "<instance_ip>".into());
     let instance_id = session.artifacts.get("instance_id").cloned();
+    let ssm_session_document = session.artifacts.get("ssm_session_document").cloned();
+    let ssm_command = if let Some(document) = ssm_session_document {
+        format!(
+            "   aws ssm start-session --target {} --document-name {document} --region {region}",
+            instance_id.as_deref().unwrap_or("<instance-id>")
+        )
+    } else {
+        format!(
+            "   aws ssm start-session --target {} --region {region}",
+            instance_id.as_deref().unwrap_or("<instance-id>")
+        )
+    };
 
     let mut lines = vec![
         Line::from(vec![
@@ -78,10 +90,7 @@ pub fn content(state: &AppState) -> Text<'static> {
             "1. Connect to your instance via SSM:",
             Style::default().fg(Color::Cyan),
         )]),
-        command_line(format!(
-            "   aws ssm start-session --target {} --region {region}",
-            instance_id.as_deref().unwrap_or("<instance-id>")
-        )),
+        command_line(ssm_command),
         Line::from(vec![Span::styled(
             "2. Set your Telegram bot token:",
             Style::default().fg(Color::Cyan),
@@ -166,6 +175,7 @@ mod tests {
             artifacts: BTreeMap::from([
                 ("instance_id".into(), "i-123".into()),
                 ("public_ip".into(), "1.2.3.4".into()),
+                ("ssm_session_document".into(), "Loki-Session".into()),
             ]),
             status_summary: Some("deployment completed".into()),
         });
@@ -183,7 +193,9 @@ mod tests {
         assert!(rendered.contains("Stack: loki-openclaw"));
         assert!(rendered.contains("Region: us-east-1"));
         assert!(rendered.contains("Instance: i-123"));
-        assert!(rendered.contains("aws ssm start-session --target i-123 --region us-east-1"));
+        assert!(rendered.contains(
+            "aws ssm start-session --target i-123 --document-name Loki-Session --region us-east-1"
+        ));
         assert!(rendered.contains("https://docs.openclaw.ai/getting-started"));
         assert!(rendered.contains("Press q to exit"));
     }

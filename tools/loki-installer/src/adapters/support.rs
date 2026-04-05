@@ -1,5 +1,6 @@
 use crate::core::{AdapterError, InstallEvent, InstallEventSink};
 use regex::Regex;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -11,6 +12,7 @@ pub(crate) struct CommandSpec {
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
     pub(crate) current_dir: Option<String>,
+    pub(crate) env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,7 +169,8 @@ fn strip_ansi(input: &str) -> String {
     let re = Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]").unwrap();
     let cleaned = re.replace_all(input, "");
     cleaned
-        .replace(['│', '╵', '╷'], "").replace('\r', "")
+        .replace(['│', '╵', '╷'], "")
+        .replace('\r', "")
         .trim()
         .to_string()
 }
@@ -218,6 +221,7 @@ pub(crate) fn resolve_repo_path_from(
 fn build_command(spec: &CommandSpec) -> Command {
     let mut command = Command::new(&spec.program);
     command.args(&spec.args);
+    command.envs(&spec.env);
     command.kill_on_drop(true);
     if let Some(current_dir) = &spec.current_dir {
         command.current_dir(Path::new(current_dir));
