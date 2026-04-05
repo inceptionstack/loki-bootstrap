@@ -25,6 +25,13 @@ pub enum AppLifecycle {
     Exiting,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TuiInstallMode {
+    #[default]
+    Simple,
+    Advanced,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct InstallRequestDraft {
     pub pack_id: Option<String>,
@@ -89,6 +96,7 @@ pub struct UserFacingError {
 pub struct AppState {
     pub screen: ScreenId,
     pub lifecycle: AppLifecycle,
+    pub install_mode: TuiInstallMode,
     pub request_draft: InstallRequestDraft,
     pub doctor: DoctorState,
     pub plan: Option<InstallPlan>,
@@ -101,6 +109,7 @@ pub struct AppState {
     pub methods: Vec<MethodManifest>,
     pub auto_selected_pack: bool,
     pub auto_selected_profile: bool,
+    pub auto_selected_method: bool,
 }
 
 impl Default for AppState {
@@ -108,6 +117,7 @@ impl Default for AppState {
         Self {
             screen: ScreenId::Welcome,
             lifecycle: AppLifecycle::Running,
+            install_mode: TuiInstallMode::Simple,
             request_draft: InstallRequestDraft::default(),
             doctor: DoctorState::default(),
             plan: None,
@@ -120,6 +130,7 @@ impl Default for AppState {
             methods: Vec::new(),
             auto_selected_pack: false,
             auto_selected_profile: false,
+            auto_selected_method: false,
         }
     }
 }

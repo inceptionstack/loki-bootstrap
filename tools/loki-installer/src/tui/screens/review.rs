@@ -1,6 +1,6 @@
 //! Install plan review screen content.
 
-use crate::tui::app::AppState;
+use crate::tui::app::{AppState, TuiInstallMode};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
@@ -11,12 +11,24 @@ pub fn content(state: &AppState) -> Text<'static> {
     if let Some(plan) = &state.plan {
         lines.push(label_value_line("Pack: ", &plan.resolved_pack.id));
         lines.push(label_value_line("Profile: ", &plan.resolved_profile.id));
-        lines.push(label_value_line("Method: ", &plan.resolved_method.id.to_string()));
+        lines.push(label_value_line(
+            "Method: ",
+            &plan.resolved_method.id.to_string(),
+        ));
         lines.push(label_value_line("Region: ", &plan.resolved_region));
         lines.push(label_value_line(
             "Stack name: ",
             &plan.resolved_stack_name.clone().unwrap_or_default(),
         ));
+        if state.install_mode == TuiInstallMode::Simple {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![Span::styled(
+                "Using recommended defaults. Press A for advanced options.",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )]));
+        }
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
             "Steps:",
@@ -25,7 +37,10 @@ pub fn content(state: &AppState) -> Text<'static> {
         for step in &plan.deploy_steps {
             lines.push(Line::from(vec![
                 Span::raw(" - "),
-                Span::styled(format!("[{}] ", step.phase), Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    format!("[{}] ", step.phase),
+                    Style::default().fg(Color::Cyan),
+                ),
                 Span::raw(step.display_name.clone()),
             ]));
         }

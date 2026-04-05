@@ -208,6 +208,7 @@ resource "aws_iam_instance_profile" "main" {
 # Bedrock Model Access (Lambda + invocation)
 # ============================================================================
 resource "aws_iam_role" "bedrock_form_lambda" {
+  count = var.enable_satellite_services ? 1 : 0
   name = "${var.environment_name}-bedrock-form-role"
 
   assume_role_policy = jsonencode({
@@ -221,13 +222,15 @@ resource "aws_iam_role" "bedrock_form_lambda" {
 }
 
 resource "aws_iam_role_policy_attachment" "bedrock_form_lambda_basic" {
-  role       = aws_iam_role.bedrock_form_lambda.name
+  count      = var.enable_satellite_services ? 1 : 0
+  role       = aws_iam_role.bedrock_form_lambda[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 resource "aws_iam_role_policy" "bedrock_form" {
+  count = var.enable_satellite_services ? 1 : 0
   name = "bedrock-form"
-  role = aws_iam_role.bedrock_form_lambda.id
+  role = aws_iam_role.bedrock_form_lambda[0].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -254,6 +257,7 @@ resource "aws_iam_role_policy" "bedrock_form" {
 }
 
 data "archive_file" "bedrock_form" {
+  count       = var.enable_satellite_services ? 1 : 0
   type        = "zip"
   output_path = "${path.module}/.lambda_zips/bedrock_form.zip"
 
@@ -330,18 +334,20 @@ def handler(event, context):
 }
 
 resource "aws_lambda_function" "bedrock_form" {
+  count            = var.enable_satellite_services ? 1 : 0
   function_name    = "${var.environment_name}-bedrock-form"
-  role             = aws_iam_role.bedrock_form_lambda.arn
+  role             = aws_iam_role.bedrock_form_lambda[0].arn
   handler          = "index.handler"
   runtime          = "python3.12"
   timeout          = 120
-  filename         = data.archive_file.bedrock_form.output_path
-  source_code_hash = data.archive_file.bedrock_form.output_base64sha256
+  filename         = data.archive_file.bedrock_form[0].output_path
+  source_code_hash = data.archive_file.bedrock_form[0].output_base64sha256
 
   depends_on = [aws_iam_role_policy.bedrock_form]
 }
 
 resource "null_resource" "bedrock_form_invoke" {
+  count      = var.enable_satellite_services ? 1 : 0
   depends_on = [aws_lambda_function.bedrock_form]
 
   provisioner "local-exec" {
@@ -360,6 +366,7 @@ resource "null_resource" "bedrock_form_invoke" {
 # Security Services Enablement (Lambda + invocation)
 # ============================================================================
 resource "aws_iam_role" "security_enablement_lambda" {
+  count = var.enable_satellite_services ? 1 : 0
   name = "${var.environment_name}-security-enable-role"
 
   assume_role_policy = jsonencode({
@@ -373,13 +380,15 @@ resource "aws_iam_role" "security_enablement_lambda" {
 }
 
 resource "aws_iam_role_policy_attachment" "security_enablement_basic" {
-  role       = aws_iam_role.security_enablement_lambda.name
+  count      = var.enable_satellite_services ? 1 : 0
+  role       = aws_iam_role.security_enablement_lambda[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 resource "aws_iam_role_policy" "security_services" {
+  count = var.enable_satellite_services ? 1 : 0
   name = "security-services"
-  role = aws_iam_role.security_enablement_lambda.id
+  role = aws_iam_role.security_enablement_lambda[0].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -412,6 +421,7 @@ resource "aws_iam_role_policy" "security_services" {
 }
 
 data "archive_file" "security_enablement" {
+  count       = var.enable_satellite_services ? 1 : 0
   type        = "zip"
   output_path = "${path.module}/.lambda_zips/security_enablement.zip"
 
@@ -558,19 +568,20 @@ def handler(event, context):
 }
 
 resource "aws_lambda_function" "security_enablement" {
+  count            = var.enable_satellite_services ? 1 : 0
   function_name    = "${var.environment_name}-security-enable"
-  role             = aws_iam_role.security_enablement_lambda.arn
+  role             = aws_iam_role.security_enablement_lambda[0].arn
   handler          = "index.handler"
   runtime          = "python3.12"
   timeout          = 120
-  filename         = data.archive_file.security_enablement.output_path
-  source_code_hash = data.archive_file.security_enablement.output_base64sha256
+  filename         = data.archive_file.security_enablement[0].output_path
+  source_code_hash = data.archive_file.security_enablement[0].output_base64sha256
 
   depends_on = [aws_iam_role_policy.security_services]
 }
 
 resource "null_resource" "security_enablement_invoke" {
-  count      = var.profile_name != "personal_assistant" ? 1 : 0
+  count      = var.enable_satellite_services && var.profile_name != "personal_assistant" ? 1 : 0
   depends_on = [aws_lambda_function.security_enablement]
 
   provisioner "local-exec" {
@@ -589,7 +600,7 @@ resource "null_resource" "security_enablement_invoke" {
 # Admin Console User — only for builder profile
 # ============================================================================
 resource "aws_iam_user" "admin" {
-  count = var.profile_name == "builder" ? 1 : 0
+  count = var.enable_satellite_services && var.profile_name == "builder" ? 1 : 0
   name  = "${var.environment_name}-admin"
 
   tags = merge(local.loki_tags, {
@@ -599,19 +610,19 @@ resource "aws_iam_user" "admin" {
 }
 
 resource "aws_iam_user_policy_attachment" "admin" {
-  count      = var.profile_name == "builder" ? 1 : 0
+  count      = var.enable_satellite_services && var.profile_name == "builder" ? 1 : 0
   user       = aws_iam_user.admin[0].name
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
 
 resource "aws_iam_access_key" "admin" {
-  count = var.profile_name == "builder" ? 1 : 0
+  count = var.enable_satellite_services && var.profile_name == "builder" ? 1 : 0
   user  = aws_iam_user.admin[0].name
 }
 
 # Admin password Lambda
 resource "aws_iam_role" "admin_setup_lambda" {
-  count = var.profile_name == "builder" ? 1 : 0
+  count = var.enable_satellite_services && var.profile_name == "builder" ? 1 : 0
   name  = "${var.environment_name}-admin-pw-role"
 
   assume_role_policy = jsonencode({
@@ -631,6 +642,7 @@ resource "aws_iam_role_policy_attachment" "admin_setup_basic" {
 }
 
 data "archive_file" "admin_setup" {
+  count       = var.enable_satellite_services && var.profile_name == "builder" ? 1 : 0
   type        = "zip"
   output_path = "${path.module}/.lambda_zips/admin_setup.zip"
 
@@ -648,20 +660,20 @@ def handler(event, context):
 }
 
 resource "aws_lambda_function" "admin_setup" {
-  count            = var.profile_name == "builder" ? 1 : 0
+  count            = var.enable_satellite_services && var.profile_name == "builder" ? 1 : 0
   function_name    = "${var.environment_name}-admin-setup"
   role             = aws_iam_role.admin_setup_lambda[0].arn
   handler          = "index.handler"
   runtime          = "python3.12"
   timeout          = 30
-  filename         = data.archive_file.admin_setup.output_path
-  source_code_hash = data.archive_file.admin_setup.output_base64sha256
+  filename         = data.archive_file.admin_setup[0].output_path
+  source_code_hash = data.archive_file.admin_setup[0].output_base64sha256
 
   depends_on = [aws_iam_role_policy_attachment.admin_setup_basic]
 }
 
 resource "null_resource" "admin_setup_invoke" {
-  count      = var.profile_name == "builder" ? 1 : 0
+  count      = var.enable_satellite_services && var.profile_name == "builder" ? 1 : 0
   depends_on = [aws_lambda_function.admin_setup, aws_iam_user.admin]
 
   provisioner "local-exec" {

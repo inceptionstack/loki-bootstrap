@@ -1,6 +1,7 @@
 //! Pure TUI state transition logic.
 
-use crate::tui::app::{AppLifecycle, AppState, ScreenId, UserFacingError};
+use crate::core::DeployMethodId;
+use crate::tui::app::{AppLifecycle, AppState, ScreenId, TuiInstallMode, UserFacingError};
 use crate::tui::events::InstallerEvent;
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::time::Instant;
@@ -40,6 +41,22 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
             }
 
             match key.code {
+                KeyCode::Char('s') | KeyCode::Char('S') if state.screen == ScreenId::Welcome => {
+                    state.install_mode = TuiInstallMode::Simple;
+                    vec![AppAction::RunDoctor]
+                }
+                KeyCode::Char('a') | KeyCode::Char('A') if state.screen == ScreenId::Welcome => {
+                    state.install_mode = TuiInstallMode::Advanced;
+                    vec![AppAction::RunDoctor]
+                }
+                KeyCode::Char('a') | KeyCode::Char('A')
+                    if state.screen == ScreenId::Review
+                        && state.install_mode == TuiInstallMode::Simple =>
+                {
+                    state.install_mode = TuiInstallMode::Advanced;
+                    state.screen = ScreenId::PackSelection;
+                    vec![AppAction::LoadPacks]
+                }
                 KeyCode::Char('q') => {
                     state.lifecycle = AppLifecycle::Exiting;
                     vec![AppAction::Exit]
@@ -62,11 +79,19 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
                 KeyCode::Char(' ') => select_current(state),
                 KeyCode::Char('r') => retry(state),
                 KeyCode::Down | KeyCode::Char('j') => {
-                    move_cursor_or_scroll_logs(state, 1);
+                    if state.screen == ScreenId::DeployProgress {
+                        scroll_logs(state, 1);
+                    } else {
+                        move_cursor(state, 1);
+                    }
                     vec![AppAction::Render]
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    move_cursor_or_scroll_logs(state, -1);
+                    if state.screen == ScreenId::DeployProgress {
+                        scroll_logs(state, -1);
+                    } else {
+                        move_cursor(state, -1);
+                    }
                     vec![AppAction::Render]
                 }
                 _ => vec![AppAction::Render],
@@ -76,9 +101,14 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
             if let Ok(packs) = result {
                 state.auto_selected_pack = false;
                 state.auto_selected_profile = false;
-                state.packs = packs.into_iter().filter(|pack| !pack.experimental).collect();
+                state.auto_selected_method = false;
+                state.packs = packs
+                    .into_iter()
+                    .filter(|pack| !pack.experimental)
+                    .collect();
                 state.request_draft.pack_cursor = 0;
                 state.request_draft.profile_cursor = 0;
+                state.request_draft.method_cursor = 0;
                 if let Some(pack) = state.packs.get(state.request_draft.pack_cursor) {
                     state.request_draft.pack_id = Some(pack.id.clone());
                 }
@@ -102,6 +132,7 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
             if let Ok(profiles) = result {
                 state.profiles = profiles;
                 state.auto_selected_profile = false;
+                state.auto_selected_method = false;
                 state.request_draft.profile_cursor = 0;
                 if let Some(profile) = state.profiles.get(state.request_draft.profile_cursor) {
                     state.request_draft.profile_id = Some(profile.id.clone());
@@ -125,10 +156,22 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
         InstallerEvent::MethodsLoaded(result) => {
             if let Ok(methods) = result {
                 state.methods = methods;
+                state.auto_selected_method = false;
+                state.request_draft.method_cursor = 0;
                 if let Some(method) = state.methods.get(state.request_draft.method_cursor) {
                     state.request_draft.method_id = Some(method.id);
                 }
                 state.screen = ScreenId::MethodSelection;
+                if let Some(method_idx) =
+                    find_method_index(&state.methods, DeployMethodId::Terraform)
+                {
+                    state.request_draft.method_cursor = method_idx;
+                    if let Some(method) = state.methods.get(method_idx) {
+                        state.request_draft.method_id = Some(method.id);
+                        state.auto_selected_method = true;
+                        return vec![AppAction::BuildPlan];
+                    }
+                }
             }
             vec![AppAction::Render]
         }
@@ -212,8 +255,8 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
         }
         InstallerEvent::Tick => {
             if state.screen == ScreenId::DeployProgress {
-                state.deployment.spinner_frame =
-                    (state.deployment.spinner_frame + 1) % crate::tui::screens::deploy::SPINNER.len();
+                state.deployment.spinner_frame = (state.deployment.spinner_frame + 1)
+                    % crate::tui::screens::deploy::SPINNER.len();
                 state.deployment.last_tick = Some(Instant::now());
                 return vec![AppAction::Render];
             }
@@ -229,8 +272,24 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
 
 fn advance(state: &mut AppState) -> Vec<AppAction> {
     match state.screen {
-        ScreenId::Welcome => vec![AppAction::RunDoctor],
-        ScreenId::DoctorPreflight => vec![AppAction::LoadPacks],
+        ScreenId::Welcome => {
+            state.install_mode = TuiInstallMode::Simple;
+            vec![AppAction::RunDoctor]
+        }
+        ScreenId::DoctorPreflight => {
+            if state.install_mode == TuiInstallMode::Simple {
+                state.request_draft.pack_id = Some("openclaw".into());
+                state.request_draft.profile_id = Some("builder".into());
+                state.request_draft.method_id = Some(DeployMethodId::Terraform);
+                state.request_draft.region = Some("us-east-1".into());
+                state.auto_selected_pack = true;
+                state.auto_selected_profile = true;
+                state.auto_selected_method = true;
+                vec![AppAction::BuildPlan]
+            } else {
+                vec![AppAction::LoadPacks]
+            }
+        }
         ScreenId::PackSelection => {
             if !state.auto_selected_pack
                 && let Some(pack_idx) = find_pack_index(&state.packs, "openclaw")
@@ -289,7 +348,13 @@ fn go_back(state: &mut AppState) -> Vec<AppAction> {
         ScreenId::PackSelection => ScreenId::DoctorPreflight,
         ScreenId::ProfileSelection => ScreenId::PackSelection,
         ScreenId::MethodSelection => ScreenId::ProfileSelection,
-        ScreenId::Review => ScreenId::MethodSelection,
+        ScreenId::Review => {
+            if state.install_mode == TuiInstallMode::Simple {
+                ScreenId::DoctorPreflight
+            } else {
+                ScreenId::MethodSelection
+            }
+        }
         ScreenId::DeployProgress => ScreenId::DeployProgress,
         ScreenId::PostInstall => ScreenId::DeployProgress,
     };
@@ -331,32 +396,24 @@ fn move_cursor(state: &mut AppState, delta: isize) {
     }
 }
 
-fn move_cursor_or_scroll_logs(state: &mut AppState, delta: isize) {
-    if state.screen == ScreenId::DeployProgress {
-        let visible_lines = 30usize;
-        let max_offset = state.deployment.logs.len().saturating_sub(visible_lines);
-        if delta.is_negative() {
-            state.deployment.scroll_offset = state
-                .deployment
-                .scroll_offset
-                .saturating_add(delta.unsigned_abs())
-                .min(max_offset);
-        } else {
-            state.deployment.scroll_offset = state
-                .deployment
-                .scroll_offset
-                .saturating_sub(delta as usize);
-        }
-        return;
+fn scroll_logs(state: &mut AppState, delta: isize) {
+    let visible_lines = 30usize;
+    let max_offset = state.deployment.logs.len().saturating_sub(visible_lines);
+    if delta.is_negative() {
+        state.deployment.scroll_offset = state
+            .deployment
+            .scroll_offset
+            .saturating_add(delta.unsigned_abs())
+            .min(max_offset);
+    } else {
+        state.deployment.scroll_offset = state
+            .deployment
+            .scroll_offset
+            .saturating_sub(delta as usize);
     }
-
-    move_cursor(state, delta);
 }
 
-fn find_pack_index(
-    packs: &[crate::core::PackManifest],
-    target_pack_id: &str,
-) -> Option<usize> {
+fn find_pack_index(packs: &[crate::core::PackManifest], target_pack_id: &str) -> Option<usize> {
     packs.iter().position(|pack| pack.id == target_pack_id)
 }
 
@@ -367,6 +424,15 @@ fn find_profile_index(
     profiles
         .iter()
         .position(|profile| profile.id == target_profile_id)
+}
+
+fn find_method_index(
+    methods: &[crate::core::MethodManifest],
+    target_method_id: DeployMethodId,
+) -> Option<usize> {
+    methods
+        .iter()
+        .position(|method| method.id == target_method_id)
 }
 
 fn select_current(state: &mut AppState) -> Vec<AppAction> {
@@ -603,6 +669,83 @@ mod tests {
             actions.as_slice(),
             [AppAction::LoadMethods { pack_id }] if pack_id == "openclaw"
         ));
+    }
+
+    #[test]
+    fn methods_loaded_auto_selects_terraform_and_builds_plan() {
+        let mut state = AppState::default();
+
+        let actions = update(
+            &mut state,
+            InstallerEvent::MethodsLoaded(Ok(vec![
+                MethodManifest {
+                    schema_version: 1,
+                    id: DeployMethodId::Cfn,
+                    display_name: "CloudFormation".into(),
+                    description: None,
+                    requires_stack_name: true,
+                    requires_region: true,
+                    required_tools: vec!["aws".into()],
+                    supports_resume: true,
+                    supports_uninstall: true,
+                    input_schema: Default::default(),
+                },
+                MethodManifest {
+                    schema_version: 1,
+                    id: DeployMethodId::Terraform,
+                    display_name: "Terraform".into(),
+                    description: None,
+                    requires_stack_name: true,
+                    requires_region: true,
+                    required_tools: vec!["terraform".into()],
+                    supports_resume: true,
+                    supports_uninstall: false,
+                    input_schema: Default::default(),
+                },
+            ])),
+        );
+
+        assert_eq!(
+            state.request_draft.method_id,
+            Some(DeployMethodId::Terraform)
+        );
+        assert_eq!(state.request_draft.method_cursor, 1);
+        assert!(state.auto_selected_method);
+        assert!(matches!(actions.as_slice(), [AppAction::BuildPlan]));
+    }
+
+    #[test]
+    fn simple_mode_skips_selection_and_builds_plan_after_doctor() {
+        let mut state = AppState::default();
+        state.screen = ScreenId::DoctorPreflight;
+        state.install_mode = TuiInstallMode::Simple;
+
+        let actions = update(&mut state, InstallerEvent::KeyPressed(key(KeyCode::Enter)));
+
+        assert_eq!(state.request_draft.pack_id.as_deref(), Some("openclaw"));
+        assert_eq!(state.request_draft.profile_id.as_deref(), Some("builder"));
+        assert_eq!(
+            state.request_draft.method_id,
+            Some(DeployMethodId::Terraform)
+        );
+        assert_eq!(state.request_draft.region.as_deref(), Some("us-east-1"));
+        assert!(matches!(actions.as_slice(), [AppAction::BuildPlan]));
+    }
+
+    #[test]
+    fn review_a_switches_simple_mode_to_advanced_and_reloads_packs() {
+        let mut state = AppState::default();
+        state.screen = ScreenId::Review;
+        state.install_mode = TuiInstallMode::Simple;
+
+        let actions = update(
+            &mut state,
+            InstallerEvent::KeyPressed(key(KeyCode::Char('a'))),
+        );
+
+        assert_eq!(state.install_mode, TuiInstallMode::Advanced);
+        assert_eq!(state.screen, ScreenId::PackSelection);
+        assert!(matches!(actions.as_slice(), [AppAction::LoadPacks]));
     }
 
     #[test]

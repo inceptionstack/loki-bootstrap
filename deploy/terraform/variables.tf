@@ -203,6 +203,12 @@ variable "request_quota_increases" {
   }
 }
 
+variable "enable_satellite_services" {
+  type        = bool
+  default     = true
+  description = "Enable satellite services (security monitoring, admin user, bedrock form lambda). Set false for re-installs or existing VPC deployments."
+}
+
 variable "enable_security_hub" {
   type        = bool
   default     = true

@@ -219,11 +219,10 @@ impl TuiEventSink {
 impl InstallEventSink for TuiEventSink {
     async fn emit(&mut self, event: InstallEvent) {
         let result = match event {
-            InstallEvent::PhaseStarted { phase, message } => {
-                self.tx
-                    .send(InstallerEvent::DeployPhaseStarted { phase, message })
-                    .map_err(|err| err.to_string())
-            }
+            InstallEvent::PhaseStarted { phase, message } => self
+                .tx
+                .send(InstallerEvent::DeployPhaseStarted { phase, message })
+                .map_err(|err| err.to_string()),
             InstallEvent::StepStarted {
                 step_id,
                 display_name,
@@ -323,7 +322,7 @@ fn render(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &AppState) -
         );
 
         let content = match state.screen {
-            ScreenId::Welcome => screens::welcome::content(),
+            ScreenId::Welcome => screens::welcome::content(state),
             ScreenId::DoctorPreflight => screens::preflight::content(state),
             ScreenId::PackSelection => screens::pack_select::content(state),
             ScreenId::ProfileSelection => screens::profile_select::content(state),
@@ -343,10 +342,7 @@ fn render(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &AppState) -
         }
         frame.render_widget(paragraph, body[1]);
 
-        frame.render_widget(
-            Paragraph::new(footer_text(state)),
-            areas[1],
-        );
+        frame.render_widget(Paragraph::new(footer_text(state)), areas[1]);
 
         if state.ui.help_visible {
             let help_area = centered_rect(66, 14, frame.area());
@@ -375,9 +371,7 @@ fn footer_text(state: &AppState) -> Text<'static> {
         .map(|error| {
             Text::from(Line::from(vec![Span::styled(
                 format!("Error: {} | ? help | q quit | b/h back", error.message),
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )]))
         })
         .unwrap_or_else(|| {
@@ -420,7 +414,9 @@ struct RegistryPack {
     pack_type: String,
 }
 
-fn load_tui_packs(planner: &Planner) -> Result<Vec<crate::core::PackManifest>, crate::core::ManifestError> {
+fn load_tui_packs(
+    planner: &Planner,
+) -> Result<Vec<crate::core::PackManifest>, crate::core::ManifestError> {
     let mut packs = planner.repo().load_all_packs()?;
     let packs_root = planner.repo().root().join("packs");
     let registry_path = packs_root.join("registry.yaml");

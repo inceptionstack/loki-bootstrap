@@ -24,7 +24,10 @@ pub fn content(state: &AppState) -> Text<'static> {
     if let Some(plan) = &state.plan {
         for step in &plan.deploy_steps {
             let (marker, style) = if state.deployment.failed_steps.contains(&step.id) {
-                ("✗", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                (
+                    "✗",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                )
             } else if state.deployment.current_step_id.as_deref() == Some(step.id.as_str()) {
                 (
                     SPINNER[state.deployment.spinner_frame % SPINNER.len()],
@@ -33,13 +36,21 @@ pub fn content(state: &AppState) -> Text<'static> {
                         .add_modifier(Modifier::BOLD),
                 )
             } else if state.deployment.completed_steps.contains(&step.id) {
-                ("✓", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+                (
+                    "✓",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                )
             } else {
                 ("•", Style::default().fg(Color::DarkGray))
             };
             lines.push(Line::from(vec![
                 Span::styled(format!("{marker} "), style),
-                Span::styled(format!("[{}] ", step.phase), Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    format!("[{}] ", step.phase),
+                    Style::default().fg(Color::Cyan),
+                ),
                 Span::raw(step.display_name.clone()),
             ]));
         }

@@ -1,4 +1,5 @@
 use crate::core::{AdapterError, InstallEvent, InstallEventSink};
+use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -110,20 +111,26 @@ pub(crate) async fn run_command_streaming(
     while let Some(message) = rx.recv().await {
         match message {
             StreamMessage::Stdout(line) => {
-                event_sink
-                    .emit(InstallEvent::LogLine {
-                        message: line.clone(),
-                    })
-                    .await;
-                stdout_lines.push(line);
+                let line = strip_ansi(&line);
+                if !line.is_empty() {
+                    event_sink
+                        .emit(InstallEvent::LogLine {
+                            message: line.clone(),
+                        })
+                        .await;
+                    stdout_lines.push(line);
+                }
             }
             StreamMessage::Stderr(line) => {
-                event_sink
-                    .emit(InstallEvent::LogLine {
-                        message: line.clone(),
-                    })
-                    .await;
-                stderr_lines.push(line);
+                let line = strip_ansi(&line);
+                if !line.is_empty() {
+                    event_sink
+                        .emit(InstallEvent::LogLine {
+                            message: line.clone(),
+                        })
+                        .await;
+                    stderr_lines.push(line);
+                }
             }
             StreamMessage::ReadError(err) => {
                 return Err(AdapterError::Message(format!(
@@ -154,6 +161,12 @@ pub(crate) async fn run_command_streaming(
         stdout: stdout_lines.join("\n").trim().to_string(),
         stderr: stderr_lines.join("\n").trim().to_string(),
     })
+}
+
+fn strip_ansi(input: &str) -> String {
+    let re = Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]").unwrap();
+    let cleaned = re.replace_all(input, "");
+    cleaned.replace(['│', '╵', '╷'], "").trim().to_string()
 }
 
 pub(crate) fn spawn_child(spec: &CommandSpec) -> Result<tokio::process::Child, AdapterError> {
@@ -226,4 +239,18 @@ fn spawn_command(
             spec.args.join(" ")
         ))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_ansi;
+
+    #[test]
+    fn strip_ansi_removes_escape_sequences_and_box_drawing() {
+        assert_eq!(
+            strip_ansi("\u{1b}[31m│ Error ╵ details ╷\u{1b}[0m"),
+            "Error  details"
+        );
+        assert_eq!(strip_ansi("   \u{1b}[32mok\u{1b}[0m   "), "ok");
+    }
 }

@@ -286,10 +286,7 @@ async fn apply_terraform(
             }
             "terraform-apply" => {
                 let output = run_command_streaming(
-                    &build_terraform_apply_command(
-                    &context.working_dir,
-                    &context.plan_file,
-                ),
+                    &build_terraform_apply_command(&context.working_dir, &context.plan_file),
                     event_sink,
                 )
                 .await?;
@@ -297,11 +294,16 @@ async fn apply_terraform(
                     output
                 } else {
                     let combined_output = format!("{}\n{}", output.stderr, output.stdout);
-                    let is_existing_resource_error = combined_output.contains("EntityAlreadyExists")
-                        || combined_output.to_ascii_lowercase().contains("already exists");
+                    let is_existing_resource_error = combined_output
+                        .contains("EntityAlreadyExists")
+                        || combined_output
+                            .to_ascii_lowercase()
+                            .contains("already exists");
                     let existing_resources = parse_existing_resources(&combined_output);
 
                     if is_existing_resource_error && !existing_resources.is_empty() {
+                        let retry_tf_vars =
+                            with_tf_var(&context.tf_vars, "enable_satellite_services", "false");
                         for (resource_address, import_id) in existing_resources {
                             event_sink
                                 .emit(InstallEvent::LogLine {
@@ -325,7 +327,7 @@ async fn apply_terraform(
                             &context.pack,
                             &context.profile,
                             &context.environment_name,
-                            &context.tf_vars,
+                            &retry_tf_vars,
                         ))
                         .await?;
                         ensure_terraform_success(
@@ -426,6 +428,7 @@ fn build_terraform_plan_command(
     let mut args = vec![
         format!("-chdir={working_dir}"),
         "plan".into(),
+        "-no-color".into(),
         "-input=false".into(),
         format!("-out={plan_file}"),
         format!("-var=aws_region={region}"),
@@ -453,6 +456,7 @@ fn adapter_option_to_tf_var(key: &str) -> Option<&'static str> {
         "hermes_model" => Some("hermes_model"),
         "haiku_model" => Some("haiku_model"),
         "sandbox_name" => Some("sandbox_name"),
+        "enable_satellite_services" => Some("enable_satellite_services"),
         "working_dir" | "pack" | "profile" | "region" | "workspace" | "repo_root" => None,
         _ => None,
     }
@@ -464,12 +468,23 @@ fn build_terraform_apply_command(working_dir: &str, plan_file: &str) -> CommandS
         args: vec![
             format!("-chdir={working_dir}"),
             "apply".into(),
+            "-no-color".into(),
             "-input=false".into(),
             "-auto-approve".into(),
             plan_file.into(),
         ],
         current_dir: None,
     }
+}
+
+fn with_tf_var(tf_vars: &[(String, String)], name: &str, value: &str) -> Vec<(String, String)> {
+    let mut updated = tf_vars.to_vec();
+    if let Some((_, existing_value)) = updated.iter_mut().find(|(key, _)| key == name) {
+        *existing_value = value.to_string();
+    } else {
+        updated.push((name.to_string(), value.to_string()));
+    }
+    updated
 }
 
 fn build_terraform_output_command(working_dir: &str) -> CommandSpec {
@@ -547,9 +562,10 @@ fn parse_existing_resources(stderr: &str) -> Vec<(String, String)> {
             continue;
         };
 
-        if !resources.iter().any(|(address, id)| {
-            address == &resource_address && id == &import_id
-        }) {
+        if !resources
+            .iter()
+            .any(|(address, id)| address == &resource_address && id == &import_id)
+        {
             resources.push((resource_address, import_id));
         }
         current_error_line = None;
@@ -572,22 +588,23 @@ fn extract_import_id(error_line: &str, resource_address: &str) -> Option<String>
         }
         "aws_security_group" => extract_id_with_prefix(error_line, "sg-")
             .or_else(|| extract_parenthesized_value(error_line)),
-        "aws_vpc" => {
-            extract_id_with_prefix(error_line, "vpc-").or_else(|| extract_parenthesized_value(error_line))
-        }
+        "aws_vpc" => extract_id_with_prefix(error_line, "vpc-")
+            .or_else(|| extract_parenthesized_value(error_line)),
         _ => None,
     }
 }
 
 fn supported_resource_type(resource_address: &str) -> Option<&str> {
-    resource_address.split('.').find_map(|segment| match segment {
-        "aws_iam_role" => Some("aws_iam_role"),
-        "aws_iam_instance_profile" => Some("aws_iam_instance_profile"),
-        "aws_s3_bucket" => Some("aws_s3_bucket"),
-        "aws_security_group" => Some("aws_security_group"),
-        "aws_vpc" => Some("aws_vpc"),
-        _ => None,
-    })
+    resource_address
+        .split('.')
+        .find_map(|segment| match segment {
+            "aws_iam_role" => Some("aws_iam_role"),
+            "aws_iam_instance_profile" => Some("aws_iam_instance_profile"),
+            "aws_s3_bucket" => Some("aws_s3_bucket"),
+            "aws_security_group" => Some("aws_security_group"),
+            "aws_vpc" => Some("aws_vpc"),
+            _ => None,
+        })
 }
 
 fn extract_parenthesized_value(line: &str) -> Option<String> {
@@ -757,7 +774,12 @@ mod tests {
         assert_eq!(command.program, "terraform");
         assert_eq!(
             command.args,
-            vec!["-chdir=/tmp/repo/deploy/terraform", "init", "-no-color", "-input=false",]
+            vec![
+                "-chdir=/tmp/repo/deploy/terraform",
+                "init",
+                "-no-color",
+                "-input=false",
+            ]
         );
     }
 
@@ -785,6 +807,7 @@ mod tests {
         );
         assert_eq!(command.program, "terraform");
         assert!(command.args.contains(&"plan".into()));
+        assert!(command.args.contains(&"-no-color".into()));
         assert!(command.args.contains(&"-input=false".into()));
         assert!(
             command
@@ -833,6 +856,10 @@ mod tests {
             adapter_option_to_tf_var("sandbox_name"),
             Some("sandbox_name")
         );
+        assert_eq!(
+            adapter_option_to_tf_var("enable_satellite_services"),
+            Some("enable_satellite_services")
+        );
         assert_eq!(adapter_option_to_tf_var("workspace"), None);
     }
 
@@ -846,6 +873,7 @@ mod tests {
             vec![
                 "-chdir=/tmp/repo/deploy/terraform",
                 "apply",
+                "-no-color",
                 "-input=false",
                 "-auto-approve",
                 "/tmp/repo/tfplan",

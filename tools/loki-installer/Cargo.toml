@@ -1,6 +1,6 @@
 [package]
 name = "loki-installer"
-version = "0.2.0-rc10"
+version = "0.2.0-rc11"
 edition = "2024"
 description = "Rust implementation of the Loki Installer V2 CLI, planner, TUI, and session runtime"
 license = "Apache-2.0"
@@ -21,6 +21,7 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 color-eyre = "0.6"
 futures = "0.3"
+regex = "1"
 
 [profile.release]
 strip = true
