@@ -70,7 +70,7 @@ headless_complete() {
 
 exec_v1() {
   log_bootstrap "engine=v1 reason=${1:-selected}"
-  exec bash "$V1_SCRIPT" "${RAW_ARGS[@]}"
+  exec bash "$V1_SCRIPT" ${RAW_ARGS[@]+"${RAW_ARGS[@]}"}
 }
 
 fallback_or_fail() {
@@ -323,7 +323,7 @@ else
   [[ -n "$method" ]] && V2_ARGS+=("--method" "$method")
   [[ -n "$region" ]] && V2_ARGS+=("--region" "$region")
   [[ -n "$stack_name" ]] && V2_ARGS+=("--stack-name" "$stack_name")
-  for option in "${OPTION_ARGS[@]}"; do
+  for option in ${OPTION_ARGS[@]+"${OPTION_ARGS[@]}"}; do
     V2_ARGS+=("--option" "$option")
   done
   [[ "$mode" == "non_interactive" ]] && V2_ARGS+=("--non-interactive")
