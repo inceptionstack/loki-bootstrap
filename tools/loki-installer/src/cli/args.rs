@@ -74,8 +74,12 @@ pub struct PlanArgs {
 
 #[derive(Debug, Clone, Args)]
 pub struct ResumeArgs {
+    #[arg(value_name = "SESSION_ID")]
+    pub session_id: Option<String>,
     #[arg(long)]
     pub session: Option<String>,
+    #[arg(long)]
+    pub non_interactive: bool,
     #[arg(long)]
     pub json: bool,
 }
@@ -169,6 +173,12 @@ impl DoctorArgs {
             resume_session_id: None,
             extra_options: BTreeMap::new(),
         })
+    }
+}
+
+impl ResumeArgs {
+    pub fn session_id(&self) -> Option<&str> {
+        self.session_id.as_deref().or(self.session.as_deref())
     }
 }
 

@@ -8,7 +8,7 @@ required_tools:
   - aws
   - terraform
 supports_resume: true
-supports_uninstall: true
+supports_uninstall: false
 input_schema:
   workspace:
     value_type: string

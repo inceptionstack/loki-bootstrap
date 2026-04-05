@@ -259,6 +259,8 @@ if [[ -n "$explicit_engine" ]]; then
   requested_engine="$explicit_engine"
 elif [[ -n "${LOKI_INSTALLER_ENGINE:-}" ]]; then
   requested_engine="$LOKI_INSTALLER_ENGINE"
+elif [[ -n "${LOKI_INSTALLER_EXPERIENCE:-}" ]]; then
+  requested_engine="$LOKI_INSTALLER_EXPERIENCE"
 fi
 
 if [[ "${LOKI_INSTALLER_FORCE_V1:-0}" == "1" ]]; then
@@ -303,16 +305,21 @@ if [[ $download_rc -ne 0 ]]; then
   esac
 fi
 
-V2_ARGS=("install")
-[[ -n "$pack" ]] && V2_ARGS+=("--pack" "$pack")
-[[ -n "$profile" ]] && V2_ARGS+=("--profile" "$profile")
-[[ -n "$method" ]] && V2_ARGS+=("--method" "$method")
-[[ -n "$region" ]] && V2_ARGS+=("--region" "$region")
-[[ -n "$stack_name" ]] && V2_ARGS+=("--stack-name" "$stack_name")
-[[ -n "$resume_session_id" ]] && V2_ARGS+=("--resume" "$resume_session_id")
-[[ "$mode" == "non_interactive" ]] && V2_ARGS+=("--non-interactive")
-[[ $auto_yes -eq 1 && "$mode" != "non_interactive" ]] && V2_ARGS+=("--yes")
-[[ $json_output -eq 1 ]] && V2_ARGS+=("--json")
+if [[ -n "$resume_session_id" ]]; then
+  V2_ARGS=("resume" "$resume_session_id")
+  [[ "$mode" == "non_interactive" ]] && V2_ARGS+=("--non-interactive")
+  [[ $json_output -eq 1 ]] && V2_ARGS+=("--json")
+else
+  V2_ARGS=("install")
+  [[ -n "$pack" ]] && V2_ARGS+=("--pack" "$pack")
+  [[ -n "$profile" ]] && V2_ARGS+=("--profile" "$profile")
+  [[ -n "$method" ]] && V2_ARGS+=("--method" "$method")
+  [[ -n "$region" ]] && V2_ARGS+=("--region" "$region")
+  [[ -n "$stack_name" ]] && V2_ARGS+=("--stack-name" "$stack_name")
+  [[ "$mode" == "non_interactive" ]] && V2_ARGS+=("--non-interactive")
+  [[ $auto_yes -eq 1 && "$mode" != "non_interactive" ]] && V2_ARGS+=("--yes")
+  [[ $json_output -eq 1 ]] && V2_ARGS+=("--json")
+fi
 
 log_bootstrap "engine=v2 binary=$V2_BINARY_PATH args=${V2_ARGS[*]}"
 exec "$V2_BINARY_PATH" "${V2_ARGS[@]}"

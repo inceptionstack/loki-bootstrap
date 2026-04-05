@@ -141,21 +141,12 @@ impl DeployAdapter for TerraformAdapter {
 
     async fn uninstall(
         &self,
-        session: &InstallSession,
-        event_sink: &mut dyn InstallEventSink,
+        _session: &InstallSession,
+        _event_sink: &mut dyn InstallEventSink,
     ) -> Result<UninstallResult, AdapterError> {
-        event_sink
-            .emit(InstallEvent::LogLine {
-                message: format!("would terraform destroy for pack {}", session.request.pack),
-            })
-            .await;
-        Ok(UninstallResult {
-            removed_artifacts: BTreeMap::from([("state".into(), "terraform".into())]),
-            warnings: vec![PlanWarning {
-                code: "stubbed_uninstall".into(),
-                message: "Terraform uninstall is currently a stub.".into(),
-            }],
-        })
+        Err(AdapterError::Message(
+            "Uninstall is not supported yet. Coming soon.".into(),
+        ))
     }
 
     async fn status(&self, session: &InstallSession) -> Result<DeployStatus, AdapterError> {
@@ -376,8 +367,6 @@ fn adapter_option_to_tf_var(key: &str) -> Option<&'static str> {
         "hermes_model" => Some("hermes_model"),
         "haiku_model" => Some("haiku_model"),
         "sandbox_name" => Some("sandbox_name"),
-        "telegram_token" => Some("telegram_token"),
-        "allowed_chat_ids" => Some("allowed_chat_ids"),
         "working_dir" | "pack" | "profile" | "region" | "workspace" | "repo_root" => None,
         _ => None,
     }
@@ -610,14 +599,6 @@ mod tests {
         assert_eq!(
             adapter_option_to_tf_var("sandbox_name"),
             Some("sandbox_name")
-        );
-        assert_eq!(
-            adapter_option_to_tf_var("telegram_token"),
-            Some("telegram_token")
-        );
-        assert_eq!(
-            adapter_option_to_tf_var("allowed_chat_ids"),
-            Some("allowed_chat_ids")
         );
         assert_eq!(adapter_option_to_tf_var("workspace"), None);
     }

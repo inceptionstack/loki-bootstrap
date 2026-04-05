@@ -6,7 +6,7 @@ use crate::core::{Planner, load_latest_session, load_session};
 use color_eyre::eyre::Result;
 
 pub async fn run(args: ResumeArgs, for_agent: bool, planner: Planner) -> Result<()> {
-    let mut session = match args.session.as_deref() {
+    let mut session = match args.session_id() {
         Some(session_id) => load_session(session_id)?,
         None => load_latest_session()?,
     };

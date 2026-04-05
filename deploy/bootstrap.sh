@@ -122,8 +122,6 @@ EMBED_MODEL=""
 HERMES_MODEL=""
 HAIKU_MODEL=""
 SANDBOX_NAME=""
-TELEGRAM_TOKEN=""
-ALLOWED_CHAT_IDS=""
 LITELLM_URL=""
 LITELLM_KEY=""
 LITELLM_MODEL=""
@@ -190,16 +188,6 @@ while [[ $# -gt 0 ]]; do
       SANDBOX_NAME="$2"
       shift 2
       ;;
-    --telegram-token)
-      [[ $# -gt 1 ]] || { echo "ERROR: --telegram-token requires a value" >&2; exit 1; }
-      TELEGRAM_TOKEN="$2"
-      shift 2
-      ;;
-    --allowed-chat-ids)
-      [[ $# -gt 1 ]] || { echo "ERROR: --allowed-chat-ids requires a value" >&2; exit 1; }
-      ALLOWED_CHAT_IDS="$2"
-      shift 2
-      ;;
     --litellm-base-url|--litellm-url)
       [[ $# -gt 1 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
       LITELLM_URL="$2"
@@ -255,8 +243,6 @@ jq -n \
   --arg hermes_model "$HERMES_MODEL" \
   --arg haiku_model "$HAIKU_MODEL" \
   --arg sandbox_name "$SANDBOX_NAME" \
-  --arg telegram_token "$TELEGRAM_TOKEN" \
-  --arg allowed_chat_ids "$ALLOWED_CHAT_IDS" \
   --arg litellm_url "$LITELLM_URL" \
   --arg litellm_key "$LITELLM_KEY" \
   --arg litellm_model "$LITELLM_MODEL" \
@@ -265,7 +251,6 @@ jq -n \
     model_mode:$model_mode, bedrockify_port:$bedrockify_port,
     embed_model:$embed_model, hermes_model:$hermes_model,
     haiku_model:$haiku_model, sandbox_name:$sandbox_name,
-    telegram_token:$telegram_token, allowed_chat_ids:$allowed_chat_ids,
     litellm_url:$litellm_url,
     litellm_key:$litellm_key, litellm_model:$litellm_model,
     provider_key:$provider_key}' > "${PACK_CONFIG}"

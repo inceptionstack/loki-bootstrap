@@ -6,9 +6,8 @@ use crate::adapters::support::{
 use crate::core::{
     AdapterError, AdapterPlan, AdapterValidationError, ApplyResult, DeployAction, DeployAdapter,
     DeployMethodId, DeployStatus, DeployStep, InstallEvent, InstallEventSink, InstallPhase,
-    InstallPlan, InstallRequest, InstallSession, MethodManifest, PackManifest, PlanWarning,
-    PostInstallStep, PrerequisiteCheck, PrerequisiteKind, ProfileManifest, UninstallResult,
-    update_session_phase,
+    InstallPlan, InstallRequest, InstallSession, MethodManifest, PackManifest, PostInstallStep,
+    PrerequisiteCheck, PrerequisiteKind, ProfileManifest, UninstallResult, update_session_phase,
 };
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -216,24 +215,12 @@ impl DeployAdapter for CfnAdapter {
 
     async fn uninstall(
         &self,
-        session: &InstallSession,
-        event_sink: &mut dyn InstallEventSink,
+        _session: &InstallSession,
+        _event_sink: &mut dyn InstallEventSink,
     ) -> Result<UninstallResult, AdapterError> {
-        event_sink
-            .emit(InstallEvent::LogLine {
-                message: format!("would delete stack {:?}", session.request.stack_name),
-            })
-            .await;
-        Ok(UninstallResult {
-            removed_artifacts: BTreeMap::from([(
-                "stack_name".into(),
-                session.request.stack_name.clone().unwrap_or_default(),
-            )]),
-            warnings: vec![PlanWarning {
-                code: "stubbed_uninstall".into(),
-                message: "CloudFormation uninstall is currently a stub.".into(),
-            }],
-        })
+        Err(AdapterError::Message(
+            "Uninstall is not supported yet. Coming soon.".into(),
+        ))
     }
 
     async fn status(&self, session: &InstallSession) -> Result<DeployStatus, AdapterError> {
@@ -943,8 +930,6 @@ fn adapter_option_to_cfn_parameter(key: &str) -> Option<&'static str> {
         "hermes_model" => Some("HermesModel"),
         "haiku_model" => Some("HaikuModel"),
         "sandbox_name" => Some("SandboxName"),
-        "telegram_token" => Some("TelegramToken"),
-        "allowed_chat_ids" => Some("AllowedChatIds"),
         "template_path" | "capabilities" | "pack" | "profile" | "region" => None,
         _ => None,
     }
@@ -1248,14 +1233,6 @@ mod tests {
         assert_eq!(
             adapter_option_to_cfn_parameter("sandbox_name"),
             Some("SandboxName")
-        );
-        assert_eq!(
-            adapter_option_to_cfn_parameter("telegram_token"),
-            Some("TelegramToken")
-        );
-        assert_eq!(
-            adapter_option_to_cfn_parameter("allowed_chat_ids"),
-            Some("AllowedChatIds")
         );
         assert_eq!(adapter_option_to_cfn_parameter("capabilities"), None);
     }

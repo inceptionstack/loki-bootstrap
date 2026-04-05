@@ -5,11 +5,21 @@ on:
     branches: [main, v2-cli]
     tags: ['v*']
     paths:
+      - 'install.sh'
+      - 'deploy/**'
+      - 'methods/**'
+      - 'packs/**'
+      - 'profiles/**'
       - 'tools/loki-installer/**'
       - '.github/workflows/installer-v2.yml'
   pull_request:
     branches: [main, v2-cli]
     paths:
+      - 'install.sh'
+      - 'deploy/**'
+      - 'methods/**'
+      - 'packs/**'
+      - 'profiles/**'
       - 'tools/loki-installer/**'
       - '.github/workflows/installer-v2.yml'
 
@@ -48,25 +58,25 @@ jobs:
             artifact_arch: amd64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            binary_name: loki-installer-linux-amd64
+            archive_name: loki-installer-linux-amd64.tar.gz
             strip_command: strip
           - artifact_os: linux
             artifact_arch: arm64
             runner: ubuntu-latest
             target: aarch64-unknown-linux-musl
-            binary_name: loki-installer-linux-arm64
+            archive_name: loki-installer-linux-arm64.tar.gz
             strip_command: aarch64-linux-gnu-strip
           - artifact_os: darwin
             artifact_arch: amd64
             runner: macos-latest
             target: x86_64-apple-darwin
-            binary_name: loki-installer-darwin-amd64
+            archive_name: loki-installer-darwin-amd64.tar.gz
             strip_command: strip
           - artifact_os: darwin
             artifact_arch: arm64
             runner: macos-latest
             target: aarch64-apple-darwin
-            binary_name: loki-installer-darwin-arm64
+            archive_name: loki-installer-darwin-arm64.tar.gz
             strip_command: strip
     steps:
       - uses: actions/checkout@v5
@@ -106,18 +116,22 @@ jobs:
         run: |
           mkdir -p dist
           BIN_PATH="tools/loki-installer/target/${{ matrix.target }}/release/loki-installer"
-          OUT_PATH="dist/${{ matrix.binary_name }}"
-          cp "$BIN_PATH" "$OUT_PATH"
-          "${{ matrix.strip_command }}" "$OUT_PATH"
-          shasum -a 256 "$OUT_PATH" > "${OUT_PATH}.sha256"
+          STAGE_DIR="dist/package"
+          ARCHIVE_PATH="dist/${{ matrix.archive_name }}"
+          mkdir -p "$STAGE_DIR"
+          cp "$BIN_PATH" "$STAGE_DIR/loki-installer"
+          "${{ matrix.strip_command }}" "$STAGE_DIR/loki-installer"
+          tar -C "$STAGE_DIR" -czf "$ARCHIVE_PATH" loki-installer
+          shasum -a 256 "$ARCHIVE_PATH" > "${ARCHIVE_PATH}.sha256"
+          rm -rf "$STAGE_DIR"
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.binary_name }}
+          name: ${{ matrix.archive_name }}
           path: |
-            dist/${{ matrix.binary_name }}
-            dist/${{ matrix.binary_name }}.sha256
+            dist/${{ matrix.archive_name }}
+            dist/${{ matrix.archive_name }}.sha256
 
   release:
     needs: build-release

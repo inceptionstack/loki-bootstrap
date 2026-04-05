@@ -138,19 +138,6 @@ variable "sandbox_name" {
   description = "Sandbox name for NemoClaw."
 }
 
-variable "telegram_token" {
-  type        = string
-  default     = ""
-  sensitive   = true
-  description = "Optional Telegram bot token for NemoClaw."
-}
-
-variable "allowed_chat_ids" {
-  type        = string
-  default     = ""
-  description = "Optional comma-separated Telegram chat IDs for NemoClaw."
-}
-
 variable "bedrock_region" {
   type        = string
   default     = "us-east-1"

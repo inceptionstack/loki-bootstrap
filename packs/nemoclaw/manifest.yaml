@@ -21,13 +21,3 @@ extra_options_schema:
     required: false
     default_value: loki-assistant
     description: NemoClaw sandbox name.
-  telegram_token:
-    value_type: string
-    required: false
-    default_value: ""
-    description: Optional Telegram token.
-  allowed_chat_ids:
-    value_type: string
-    required: false
-    default_value: ""
-    description: Optional comma-separated chat IDs.

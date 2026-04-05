@@ -63,6 +63,13 @@ fn parses_resume_subcommand() {
 }
 
 #[test]
+fn parses_resume_subcommand_with_positional_session() {
+    let cli = Cli::try_parse_from(["loki-installer", "resume", "abc123", "--json"])
+        .expect("parse positional resume");
+    assert!(matches!(cli.command, Command::Resume(_)));
+}
+
+#[test]
 fn parses_uninstall_subcommand() {
     let cli = Cli::try_parse_from(["loki-installer", "uninstall", "--session", "abc123"])
         .expect("parse uninstall");

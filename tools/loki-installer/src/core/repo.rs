@@ -304,7 +304,9 @@ fn is_cloudshell() -> bool {
         || std::env::var("AWS_EXECUTION_ENV")
             .map(|v| v.contains("CloudShell"))
             .unwrap_or(false)
-        || std::env::var("USER").map(|u| u == "cloudshell-user").unwrap_or(false)
+        || std::env::var("USER")
+            .map(|u| u == "cloudshell-user")
+            .unwrap_or(false)
 }
 
 fn cache_repo_dir() -> Result<PathBuf, RepoError> {

@@ -55,8 +55,6 @@ Metadata:
           - HermesModel
           - HaikuModel
           - SandboxName
-          - TelegramToken
-          - AllowedChatIds
           - LokiWatermark
     ParameterLabels:
       EnvironmentName:
@@ -115,10 +113,6 @@ Metadata:
         default: "Claude Haiku Model"
       SandboxName:
         default: "NemoClaw Sandbox Name"
-      TelegramToken:
-        default: "Telegram Token"
-      AllowedChatIds:
-        default: "Allowed Chat IDs"
       PackName:
         default: "Agent Pack"
       LokiWatermark:
@@ -245,17 +239,6 @@ Parameters:
     Type: String
     Default: 'loki-assistant'
     Description: "Sandbox name for NemoClaw."
-
-  TelegramToken:
-    Type: String
-    Default: ''
-    NoEcho: true
-    Description: "Optional Telegram bot token for NemoClaw."
-
-  AllowedChatIds:
-    Type: String
-    Default: ''
-    Description: "Optional comma-separated Telegram chat IDs for NemoClaw."
 
   BedrockRegion:
     Type: String
@@ -1219,8 +1202,6 @@ Resources:
           export HERMES_MODEL="${HermesModel}"
           export HAIKU_MODEL="${HaikuModel}"
           export SANDBOX_NAME="${SandboxName}"
-          export TELEGRAM_TOKEN="${TelegramToken}"
-          export ALLOWED_CHAT_IDS="${AllowedChatIds}"
           export MODEL_MODE="${ModelMode}"
           export LITELLM_BASE_URL="${LiteLLMBaseUrl}"
           export LITELLM_API_KEY="${LiteLLMApiKey}"
@@ -1267,8 +1248,6 @@ Resources:
             --hermes-model "$HERMES_MODEL" \
             --haiku-model "$HAIKU_MODEL" \
             --sandbox-name "$SANDBOX_NAME" \
-            --telegram-token "$TELEGRAM_TOKEN" \
-            --allowed-chat-ids "$ALLOWED_CHAT_IDS" \
             --model-mode "$MODEL_MODE" \
             --litellm-base-url "$LITELLM_BASE_URL" \
             --litellm-api-key "$LITELLM_API_KEY" \

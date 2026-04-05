@@ -7,7 +7,7 @@ requires_region: true
 required_tools:
   - aws
 supports_resume: true
-supports_uninstall: true
+supports_uninstall: false
 input_schema:
   capabilities:
     value_type: string
