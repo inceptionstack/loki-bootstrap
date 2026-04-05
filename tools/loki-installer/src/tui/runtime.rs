@@ -227,7 +227,12 @@ impl InstallEventSink for TuiEventSink {
                     .await
             }
             InstallEvent::ArtifactRecorded { key, value } => {
-                self.emit_line(format!("Recorded artifact {key}={value}"), None)
+                let display_value = if value.len() > 80 {
+                    format!("{}…", &value[..80])
+                } else {
+                    value
+                };
+                self.emit_line(format!("Recorded artifact {key}={display_value}"), None)
                     .await
             }
             InstallEvent::LogLine { message } => self.emit_line(message, None).await,

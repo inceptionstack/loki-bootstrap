@@ -10,8 +10,14 @@ pub fn content(state: &AppState) -> Text<'static> {
     }
     lines.push(Line::from(""));
     lines.push(Line::from("Logs:"));
-    for line in state.deployment.logs.iter().rev().take(12).rev() {
-        lines.push(Line::from(format!(" - {line}")));
+    for line in state.deployment.logs.iter().rev().take(20).rev() {
+        // Truncate long lines to avoid horizontal overflow
+        let display = if line.len() > 120 {
+            format!(" - {}…", &line[..120])
+        } else {
+            format!(" - {line}")
+        };
+        lines.push(Line::from(display));
     }
     Text::from(lines)
 }
