@@ -112,7 +112,7 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
             vec![AppAction::Render]
         }
         InstallerEvent::PlanBuilt(result) => {
-            match result {
+            match *result {
                 Ok(plan) => {
                     state.request_draft.region = Some(plan.resolved_region.clone());
                     state.request_draft.stack_name = plan.resolved_stack_name.clone();

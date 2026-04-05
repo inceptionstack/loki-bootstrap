@@ -15,10 +15,10 @@ pub fn content(state: &AppState) -> Text<'static> {
             "{marker} {} ({})",
             profile.display_name, profile.id
         )));
-        if idx == state.request_draft.profile_cursor {
-            if let Some(description) = &profile.description {
-                lines.push(Line::from(format!("    {description}")));
-            }
+        if idx == state.request_draft.profile_cursor
+            && let Some(description) = &profile.description
+        {
+            lines.push(Line::from(format!("    {description}")));
         }
     }
     Text::from(lines)

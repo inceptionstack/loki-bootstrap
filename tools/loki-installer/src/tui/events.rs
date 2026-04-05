@@ -12,6 +12,6 @@ pub enum InstallerEvent {
     ProfilesLoaded(Result<Vec<ProfileManifest>, String>),
     MethodsLoaded(Result<Vec<MethodManifest>, String>),
     DoctorCompleted(Result<crate::core::DoctorReport, String>),
-    PlanBuilt(Result<InstallPlan, String>),
+    PlanBuilt(Box<Result<InstallPlan, String>>),
     DeployFinished(Result<ApplyResult, String>),
 }

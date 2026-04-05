@@ -21,10 +21,10 @@ pub fn content(state: &AppState) -> Text<'static> {
             "{marker} {} ({}){experimental}",
             pack.display_name, pack.id
         )));
-        if idx == state.request_draft.pack_cursor {
-            if let Some(description) = &pack.description {
-                lines.push(Line::from(format!("    {description}")));
-            }
+        if idx == state.request_draft.pack_cursor
+            && let Some(description) = &pack.description
+        {
+            lines.push(Line::from(format!("    {description}")));
         }
     }
     Text::from(lines)

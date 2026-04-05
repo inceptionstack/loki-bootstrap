@@ -91,7 +91,7 @@ async fn run_actions(
                     Some(request) => planner.build_plan(request).await.map_err(|e| e.to_string()),
                     None => Err("pack selection is incomplete".into()),
                 };
-                pending.extend(update(state, InstallerEvent::PlanBuilt(result)));
+                pending.extend(update(state, InstallerEvent::PlanBuilt(Box::new(result))));
             }
             AppAction::StartDeploy => {
                 if let Some(plan) = state.plan.clone() {

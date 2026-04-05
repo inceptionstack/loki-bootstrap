@@ -459,20 +459,22 @@ async fn run_stack_operation_if_needed(
         return Ok(progress);
     };
 
-    let output = run_command(&build_apply_stack_command(
+    let parameter_overrides = context
+        .parameter_overrides
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+
+    let output = run_command(&build_apply_stack_command(ApplyStackCommandInput {
         operation,
-        &context.stack_name,
-        &context.region,
-        &context.template_path,
-        &context.capabilities,
-        &context.pack,
-        &context.profile,
-        &context
-            .parameter_overrides
-            .iter()
-            .map(|(key, value)| (key.as_str(), value.as_str()))
-            .collect::<Vec<_>>(),
-    ))
+        stack_name: &context.stack_name,
+        region: &context.region,
+        template_path: &context.template_path,
+        capabilities: &context.capabilities,
+        pack: &context.pack,
+        profile: &context.profile,
+        parameter_overrides: &parameter_overrides,
+    }))
     .await?;
 
     if output.success() {
@@ -571,11 +573,11 @@ async fn emit_stack_events(
             "[{}] {} {}",
             event.resource_status, event.resource_type, event.logical_resource_id
         );
-        if let Some(reason) = event.resource_status_reason {
-            if !reason.is_empty() {
-                message.push_str(": ");
-                message.push_str(&reason);
-            }
+        if let Some(reason) = event.resource_status_reason
+            && !reason.is_empty()
+        {
+            message.push_str(": ");
+            message.push_str(&reason);
         }
 
         event_sink.emit(InstallEvent::LogLine { message }).await;
@@ -690,39 +692,41 @@ fn build_describe_stack_events_command(stack_name: &str, region: &str) -> Comman
     }
 }
 
-fn build_apply_stack_command(
+struct ApplyStackCommandInput<'a> {
     operation: StackOperation,
-    stack_name: &str,
-    region: &str,
-    template_path: &str,
-    capabilities: &str,
-    pack: &str,
-    profile: &str,
-    parameter_overrides: &[(&str, &str)],
-) -> CommandSpec {
+    stack_name: &'a str,
+    region: &'a str,
+    template_path: &'a str,
+    capabilities: &'a str,
+    pack: &'a str,
+    profile: &'a str,
+    parameter_overrides: &'a [(&'a str, &'a str)],
+}
+
+fn build_apply_stack_command(input: ApplyStackCommandInput<'_>) -> CommandSpec {
     let mut args = vec![
         "cloudformation".into(),
-        match operation {
+        match input.operation {
             StackOperation::Create => "create-stack".into(),
             StackOperation::Update => "update-stack".into(),
         },
         "--stack-name".into(),
-        stack_name.into(),
+        input.stack_name.into(),
         "--template-body".into(),
-        format!("file://{template_path}"),
+        format!("file://{}", input.template_path),
         "--capabilities".into(),
-        capabilities.into(),
+        input.capabilities.into(),
         "--parameters".into(),
-        format!("ParameterKey=PackName,ParameterValue={pack}"),
-        format!("ParameterKey=ProfileName,ParameterValue={profile}"),
+        format!("ParameterKey=PackName,ParameterValue={}", input.pack),
+        format!("ParameterKey=ProfileName,ParameterValue={}", input.profile),
     ];
 
-    for (key, value) in parameter_overrides {
+    for (key, value) in input.parameter_overrides {
         args.push(format!("ParameterKey={key},ParameterValue={value}"));
     }
 
     args.push("--region".into());
-    args.push(region.into());
+    args.push(input.region.into());
 
     CommandSpec {
         program: "aws".into(),
@@ -889,8 +893,8 @@ fn map_aws_command_failure(
 #[cfg(test)]
 mod tests {
     use super::{
-        StackOperation, adapter_option_to_cfn_parameter, build_apply_stack_command,
-        build_validate_identity_command, parse_stack_artifacts,
+        ApplyStackCommandInput, StackOperation, adapter_option_to_cfn_parameter,
+        build_apply_stack_command, build_validate_identity_command, parse_stack_artifacts,
     };
 
     #[test]
@@ -912,20 +916,20 @@ mod tests {
 
     #[test]
     fn create_stack_command_includes_template_capabilities_and_parameters() {
-        let command = build_apply_stack_command(
-            StackOperation::Create,
-            "loki-openclaw",
-            "us-east-1",
-            "deploy/cloudformation/template.yaml",
-            "CAPABILITY_NAMED_IAM",
-            "openclaw",
-            "builder",
-            &[
+        let command = build_apply_stack_command(ApplyStackCommandInput {
+            operation: StackOperation::Create,
+            stack_name: "loki-openclaw",
+            region: "us-east-1",
+            template_path: "deploy/cloudformation/template.yaml",
+            capabilities: "CAPABILITY_NAMED_IAM",
+            pack: "openclaw",
+            profile: "builder",
+            parameter_overrides: &[
                 ("EnvironmentName", "loki-openclaw"),
                 ("DefaultModel", "us.anthropic.claude-opus-4-6-v1"),
                 ("OpenClawGatewayPort", "3001"),
             ],
-        );
+        });
 
         assert_eq!(command.program, "aws");
         assert_eq!(
