@@ -626,33 +626,40 @@ fn download_terraform_archive(url: &str, archive_path: &Path) -> Result<(), Adap
 }
 
 fn extract_terraform_binary(archive_path: &Path, install_path: &Path) -> Result<(), AdapterError> {
-    let output = Command::new("python3")
-        .arg("-c")
-        .arg(
-            "import os, shutil, sys, zipfile\n\
-with zipfile.ZipFile(sys.argv[1]) as archive:\n\
-    with archive.open('terraform') as src, open(sys.argv[2], 'wb') as dst:\n\
-        shutil.copyfileobj(src, dst)\n\
-os.chmod(sys.argv[2], 0o755)\n",
-        )
+    let parent = install_path
+        .parent()
+        .ok_or_else(|| AdapterError::Message("install_path has no parent".into()))?;
+    let output = Command::new("unzip")
+        .args(["-o", "-j"])
         .arg(archive_path)
-        .arg(install_path)
+        .arg("terraform")
+        .arg("-d")
+        .arg(parent)
         .output()
         .map_err(|source| {
             AdapterError::Message(format!(
-                "Failed to start python3 while extracting terraform to {} — {source}",
+                "Failed to run unzip while extracting terraform to {} — {source}",
                 install_path.display()
             ))
         })?;
-    if output.status.success() {
-        return Ok(());
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(AdapterError::Message(format!(
+            "Failed to extract terraform binary to {} — {stderr}",
+            install_path.display()
+        )));
     }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    Err(AdapterError::Message(format!(
-        "Failed to extract terraform binary to {} — {stderr}",
-        install_path.display()
-    )))
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(install_path)
+            .map_err(|e| AdapterError::Message(format!("Failed to read terraform permissions — {e}")))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(install_path, perms)
+            .map_err(|e| AdapterError::Message(format!("Failed to chmod terraform — {e}")))?;
+    }
+    Ok(())
 }
 
 fn find_command_on_path(program: &str) -> Option<PathBuf> {
