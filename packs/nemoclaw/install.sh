@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./install.sh [--region us-east-1] [--model us.anthropic.claude-sonnet-4-6] [--bedrockify-port 8090]
-#               [--sandbox-name loki-assistant] [--telegram-token TOKEN] [--allowed-chat-ids IDS]
+#               [--sandbox-name loki-assistant]
 #
 # Assumes:
 #   - bedrockify is already installed and running (see packs/bedrockify/)
@@ -25,8 +25,6 @@ PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
 PACK_ARG_MODEL="$(pack_config_get model "us.anthropic.claude-sonnet-4-6")"
 PACK_ARG_BEDROCKIFY_PORT="$(pack_config_get bedrockify_port "8090")"
 PACK_ARG_SANDBOX_NAME="$(pack_config_get sandbox_name "loki-assistant")"
-PACK_ARG_TELEGRAM_TOKEN="$(pack_config_get telegram_token "")"
-PACK_ARG_ALLOWED_CHAT_IDS="$(pack_config_get allowed_chat_ids "")"
 PACK_ARG_PROFILE="$(pack_config_get profile "")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
@@ -42,8 +40,6 @@ Options:
   --model            Bedrock model ID (via bedrockify)   (default: us.anthropic.claude-sonnet-4-6)
   --bedrockify-port  Port where bedrockify listens        (default: 8090)
   --sandbox-name     NemoClaw sandbox name               (default: loki-assistant)
-  --telegram-token   Telegram bot token (optional)
-  --allowed-chat-ids Comma-separated Telegram chat IDs (optional)
   --profile          Deployment profile name             (checked: personal_assistant only)
   --help             Show this help message
 
@@ -54,7 +50,7 @@ Profiles:
 
 Examples:
   ./install.sh --region us-east-1
-  ./install.sh --sandbox-name my-agent --telegram-token 123456:ABC
+  ./install.sh --sandbox-name my-agent
 EOF
 }
 
@@ -66,8 +62,6 @@ while [[ $# -gt 0 ]]; do
     --model)             PACK_ARG_MODEL="$2";             shift 2 ;;
     --bedrockify-port)   PACK_ARG_BEDROCKIFY_PORT="$2";  shift 2 ;;
     --sandbox-name)      PACK_ARG_SANDBOX_NAME="$2";     shift 2 ;;
-    --telegram-token)    PACK_ARG_TELEGRAM_TOKEN="$2";   shift 2 ;;
-    --allowed-chat-ids)  PACK_ARG_ALLOWED_CHAT_IDS="$2"; shift 2 ;;
     --profile)           PACK_ARG_PROFILE="$2";          shift 2 ;;
     *) [[ $# -gt 1 ]] && [[ "$2" != --* ]] && shift 2 || shift ;;
   esac
@@ -77,15 +71,10 @@ REGION="${PACK_ARG_REGION}"
 MODEL="${PACK_ARG_MODEL}"
 BEDROCKIFY_PORT="${PACK_ARG_BEDROCKIFY_PORT}"
 SANDBOX_NAME="${PACK_ARG_SANDBOX_NAME}"
-TELEGRAM_TOKEN="${PACK_ARG_TELEGRAM_TOKEN}"
-ALLOWED_CHAT_IDS="${PACK_ARG_ALLOWED_CHAT_IDS}"
 PROFILE="${PACK_ARG_PROFILE}"
 
 pack_banner "nemoclaw"
 log "region=${REGION} model=${MODEL} bedrockify-port=${BEDROCKIFY_PORT} sandbox-name=${SANDBOX_NAME}"
-if [[ -n "${TELEGRAM_TOKEN}" ]]; then
-  log "telegram-token=<set> allowed-chat-ids=${ALLOWED_CHAT_IDS:-<none>}"
-fi
 
 # ── Prerequisites ─────────────────────────────────────────────────────────────
 require_cmd curl python3
@@ -248,33 +237,7 @@ if ! nemoclaw "${SANDBOX_NAME}" status &>/dev/null; then
 fi
 ok "Sandbox '${SANDBOX_NAME}' onboarded"
 
-# ── Step 5: Configure Telegram bridge ────────────────────────────────────────
-step "Configuring Telegram bridge"
-
-if [[ -n "${TELEGRAM_TOKEN}" ]]; then
-  log "Setting up Telegram bridge for sandbox '${SANDBOX_NAME}'..."
-
-  # Persist Telegram config to ~/.nemoclaw/telegram.env so the bridge can read it
-  # across reboots and service restarts (env vars don't survive script exit)
-  TELEGRAM_ENV="${HOME}/.nemoclaw/telegram.env"
-  mkdir -p "${HOME}/.nemoclaw"
-  cat > "${TELEGRAM_ENV}" << TGEOF
-# NemoClaw Telegram bridge config (written by nemoclaw pack installer)
-TELEGRAM_BOT_TOKEN=${TELEGRAM_TOKEN}
-ALLOWED_CHAT_IDS=${ALLOWED_CHAT_IDS}
-TGEOF
-  chmod 600 "${TELEGRAM_ENV}"
-  ok "Telegram config persisted to ${TELEGRAM_ENV}"
-
-  # Also export for current session in case bridge starts now
-  export TELEGRAM_BOT_TOKEN="${TELEGRAM_TOKEN}"
-  export ALLOWED_CHAT_IDS="${ALLOWED_CHAT_IDS}"
-  ok "Telegram bridge configured (token set, config persisted)"
-else
-  log "No Telegram token provided — Telegram bridge skipped"
-fi
-
-# ── Step 6: Inject brain files ────────────────────────────────────────────────
+# ── Step 5: Inject brain files ────────────────────────────────────────────────
 step "Injecting brain files into sandbox"
 
 BRAIN_DIR="${HOME}/.openclaw/workspace"
@@ -303,7 +266,7 @@ else
   done
 fi
 
-# ── Step 7: Health check polling + done marker ────────────────────────────────
+# ── Step 6: Health check polling + done marker ────────────────────────────────
 step "Health check"
 
 log "Polling for sandbox '${SANDBOX_NAME}' to reach running state (timeout: 120s)..."

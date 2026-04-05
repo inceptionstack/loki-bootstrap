@@ -10,7 +10,7 @@
 
 ### CFN Adapter
 - **Parameter mapping is mostly correct.** `PackName`, `ProfileName`, `EnvironmentName`, `DefaultModel`, `OpenClawGatewayPort` are all mapped to CFN parameters via `build_apply_stack_command()`.
-- **Missing parameter mappings:** Pack-specific extra options like `bedrockify_port`, `embed_model`, `sandbox_name`, `telegram_token`, `allowed_chat_ids`, `hermes_model`, `haiku_model` are defined in pack manifests but **never mapped to CFN parameters**. They're resolved into `adapter_options` but `CloudFormationContext::from_plan()` only checks for `model` and `port`. These options would be silently ignored during CFN deployment.
+- **Missing parameter mappings:** Pack-specific extra options like `bedrockify_port`, `embed_model`, `sandbox_name`, `hermes_model`, `haiku_model` are defined in pack manifests but **never mapped to CFN parameters**. They're resolved into `adapter_options` but `CloudFormationContext::from_plan()` only checks for `model` and `port`. These options would be silently ignored during CFN deployment.
 - **`EnvironmentName` duplication:** The `parameter_overrides` always includes `("EnvironmentName", stack_name)` from `from_plan()`, and then the same pair appears in `build_apply_stack_command()` output via `parameter_overrides`. This means the CFN command will have `ParameterKey=EnvironmentName,ParameterValue=loki-openclaw` appearing **twice** — once from the hardcoded push in `from_plan()` and once from the loop. AWS CLI accepts duplicates (last wins), but it's confusing and fragile.
 
 ### Terraform Adapter
@@ -45,7 +45,7 @@
 
 ### Sensitive Data
 - No secrets are logged or persisted in session files directly.
-- Pack options like `telegram_token` and `allowed_chat_ids` would be stored in the session JSON file on disk if the user passes them via `--option`. The session is written to `~/.local/state/loki-installer/sessions/` without restricted permissions. **Session files should be created with mode 0600.** ⚠️
+- Pack options would be stored in the session JSON file on disk if the user passes them via `--option`. The session is written to `~/.local/state/loki-installer/sessions/` without restricted permissions. **Session files should be created with mode 0600.** ⚠️
 
 ---
 

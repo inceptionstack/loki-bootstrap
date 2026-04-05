@@ -144,6 +144,7 @@ download_and_verify_v2() {
 RAW_ARGS=("$@")
 PASS_THROUGH_ARGS=()
 UNKNOWN_FLAGS=()
+OPTION_ARGS=()
 EXPLICIT_V2=0
 explicit_engine=""
 pack=""
@@ -215,6 +216,12 @@ while [[ $# -gt 0 ]]; do
     --stack-name)
       [[ $# -ge 2 ]] || fail "--stack-name requires a value"
       stack_name="$2"
+      PASS_THROUGH_ARGS+=("$1" "$2")
+      shift 2
+      ;;
+    --option)
+      [[ $# -ge 2 ]] || fail "--option requires KEY=value"
+      OPTION_ARGS+=("$2")
       PASS_THROUGH_ARGS+=("$1" "$2")
       shift 2
       ;;
@@ -316,6 +323,9 @@ else
   [[ -n "$method" ]] && V2_ARGS+=("--method" "$method")
   [[ -n "$region" ]] && V2_ARGS+=("--region" "$region")
   [[ -n "$stack_name" ]] && V2_ARGS+=("--stack-name" "$stack_name")
+  for option in "${OPTION_ARGS[@]}"; do
+    V2_ARGS+=("--option" "$option")
+  done
   [[ "$mode" == "non_interactive" ]] && V2_ARGS+=("--non-interactive")
   [[ $auto_yes -eq 1 && "$mode" != "non_interactive" ]] && V2_ARGS+=("--yes")
   [[ $json_output -eq 1 ]] && V2_ARGS+=("--json")

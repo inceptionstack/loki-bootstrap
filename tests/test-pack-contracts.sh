@@ -6,8 +6,8 @@
 #
 # Checks:
 #   1. shell-profile.sh defines PACK_ALIASES, PACK_BANNER_NAME, PACK_BANNER_EMOJI, PACK_BANNER_COMMANDS
-#   2. manifest.yaml exists with required keys (name, version, type, description, params, provides)
-#   3. manifest.yaml name matches directory name
+#   2. manifest.yaml exists with required V2 keys
+#   3. manifest.yaml id matches directory name
 #   4. install.sh exists, is executable, has bash shebang, references common.sh, writes done marker
 #   5. resources/ directory exists
 #   6. Pack is listed in registry.yaml AND registry.json
@@ -31,32 +31,35 @@ fail() { printf "${RED}  ✗${NC} %s\n" "$1"; FAIL=$((FAIL + 1)); }
 skip() { printf "${YELLOW}  ○${NC} %s\n" "$1"; SKIP=$((SKIP + 1)); }
 header() { printf "\n${BOLD}${CYAN}%s${NC}\n" "$1"; }
 
-# Discover ALL agent packs dynamically (not a hardcoded list)
+# Discover agent packs from the registry (manifest `type` is part of the legacy schema)
 discover_agent_packs() {
   local -a packs=()
-  for dir in "${PACKS_DIR}"/*/; do
-    local pack
-    pack=$(basename "$dir")
-    [[ "$pack" == "common.sh" ]] && continue  # not a pack dir
-
-    # Check if it's an agent pack (has manifest with type: agent, or is in registry as agent)
-    local manifest="${dir}/manifest.yaml"
-    if [[ -f "$manifest" ]]; then
-      local ptype
-      ptype=$(python3 -c "import yaml; d=yaml.safe_load(open('${manifest}')); print(d.get('type',''))" 2>/dev/null || echo "")
-      if [[ "$ptype" == "agent" ]]; then
-        packs+=("$pack")
-      fi
-    fi
-  done
+  while IFS= read -r pack; do
+    [[ -n "$pack" ]] && packs+=("$pack")
+  done < <(
+    python3 -c "import yaml; data=yaml.safe_load(open('${REGISTRY_YAML}')); print('\n'.join(pack for pack, meta in data.get('packs', {}).items() if meta.get('type') == 'agent'))"
+  )
   echo "${packs[@]}"
 }
 
 # Required variables that bootstrap.sh expects from shell-profile.sh
 REQUIRED_SHELL_VARS=(PACK_ALIASES PACK_BANNER_NAME PACK_BANNER_EMOJI PACK_BANNER_COMMANDS)
 
-# Required keys in manifest.yaml
-REQUIRED_MANIFEST_KEYS=(name version type description params provides)
+# Required keys in the V2 manifest schema
+REQUIRED_MANIFEST_KEYS=(
+  schema_version
+  id
+  display_name
+  description
+  allowed_profiles
+  supported_methods
+  default_profile
+  default_method
+  default_region
+  post_install
+  required_env
+  extra_options_schema
+)
 
 # ── Discover packs ────────────────────────────────────────────────────────────
 PACKS=( $(discover_agent_packs) )
@@ -124,11 +127,11 @@ for pack in "${PACKS[@]}"; do
     fi
   done
 
-  # Name matches directory
-  if python3 -c "import yaml,sys; d=yaml.safe_load(open('${manifest}')); sys.exit(0 if d.get('name')=='${pack}' else 1)" 2>/dev/null; then
-    pass "${pack}: manifest name matches directory"
+  # ID matches directory
+  if python3 -c "import yaml,sys; d=yaml.safe_load(open('${manifest}')); sys.exit(0 if d.get('id')=='${pack}' else 1)" 2>/dev/null; then
+    pass "${pack}: manifest id matches directory"
   else
-    fail "${pack}: manifest name does NOT match directory '${pack}'"
+    fail "${pack}: manifest id does NOT match directory '${pack}'"
   fi
 done
 

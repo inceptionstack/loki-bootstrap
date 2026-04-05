@@ -257,10 +257,14 @@ async fn apply_cloudformation(
     session: &mut InstallSession,
     event_sink: &mut dyn InstallEventSink,
 ) -> Result<ApplyResult, AdapterError> {
+    if session.phase == InstallPhase::PostInstall {
+        return Ok(completed_apply_result(plan, session));
+    }
+
     let context = CloudFormationContext::from_plan(plan)?;
     let mut artifacts = BTreeMap::new();
-    let mut account_id: Option<String> = None;
-    let mut template_url: Option<String> = None;
+    let mut account_id = session.artifacts.get("aws_account_id").cloned();
+    let mut template_url = session.artifacts.get("template_url").cloned();
 
     let mut progress = StackProgress {
         operation: None,
@@ -269,6 +273,18 @@ async fn apply_cloudformation(
     };
 
     for step in &plan.deploy_steps {
+        if phase_is_past(session.phase, step.phase) {
+            event_sink
+                .emit(InstallEvent::LogLine {
+                    message: format!(
+                        "Skipping {} on resume; phase {} already completed",
+                        step.display_name, step.phase
+                    ),
+                })
+                .await;
+            continue;
+        }
+
         emit_step_started(session, event_sink, step).await;
 
         match step.id.as_str() {
@@ -935,6 +951,32 @@ fn adapter_option_to_cfn_parameter(key: &str) -> Option<&'static str> {
     }
 }
 
+fn phase_rank(phase: InstallPhase) -> u8 {
+    match phase {
+        InstallPhase::ValidateEnvironment => 0,
+        InstallPhase::DiscoverAwsContext => 1,
+        InstallPhase::ResolveMetadata => 2,
+        InstallPhase::PrepareDeployment => 3,
+        InstallPhase::PlanDeployment => 4,
+        InstallPhase::ApplyDeployment => 5,
+        InstallPhase::WaitForResources => 6,
+        InstallPhase::Finalize => 7,
+        InstallPhase::PostInstall => 8,
+    }
+}
+
+fn phase_is_past(current: InstallPhase, target: InstallPhase) -> bool {
+    phase_rank(current) > phase_rank(target)
+}
+
+fn completed_apply_result(plan: &InstallPlan, session: &InstallSession) -> ApplyResult {
+    ApplyResult {
+        final_phase: InstallPhase::PostInstall,
+        artifacts: session.artifacts.clone(),
+        post_install_steps: plan.post_install_steps.clone(),
+    }
+}
+
 fn build_wait_stack_command(stack_name: &str, region: &str, waiter: WaiterKind) -> CommandSpec {
     let waiter_name = match waiter {
         WaiterKind::CreateComplete => "stack-create-complete",
@@ -1083,8 +1125,9 @@ mod tests {
     use super::{
         ApplyStackCommandInput, StackOperation, adapter_option_to_cfn_parameter,
         build_apply_stack_command, build_create_bucket_command, build_upload_template_command,
-        build_validate_identity_command, parse_stack_artifacts,
+        build_validate_identity_command, parse_stack_artifacts, phase_is_past,
     };
+    use crate::core::InstallPhase;
 
     #[test]
     fn validate_uses_sts_get_caller_identity_json() {
@@ -1275,5 +1318,25 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("UPDATE_ROLLBACK_COMPLETE"));
         assert!(message.contains("check stack events"));
+    }
+
+    #[test]
+    fn resume_skips_only_completed_cfn_phases() {
+        assert!(phase_is_past(
+            InstallPhase::PrepareDeployment,
+            InstallPhase::ValidateEnvironment
+        ));
+        assert!(phase_is_past(
+            InstallPhase::WaitForResources,
+            InstallPhase::ApplyDeployment
+        ));
+        assert!(!phase_is_past(
+            InstallPhase::ApplyDeployment,
+            InstallPhase::ApplyDeployment
+        ));
+        assert!(!phase_is_past(
+            InstallPhase::WaitForResources,
+            InstallPhase::PostInstall
+        ));
     }
 }

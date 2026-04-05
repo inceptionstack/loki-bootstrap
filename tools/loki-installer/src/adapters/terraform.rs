@@ -214,6 +214,10 @@ async fn apply_terraform(
     session: &mut InstallSession,
     event_sink: &mut dyn InstallEventSink,
 ) -> Result<ApplyResult, AdapterError> {
+    if session.phase == InstallPhase::PostInstall {
+        return Ok(completed_apply_result(plan, session));
+    }
+
     let context = TerraformContext::from_plan(plan)?;
     if !Path::new(&context.working_dir).exists() {
         return Err(AdapterError::Message(format!(
@@ -225,6 +229,18 @@ async fn apply_terraform(
     let mut artifacts = BTreeMap::new();
 
     for step in &plan.deploy_steps {
+        if phase_is_past(session.phase, step.phase) {
+            event_sink
+                .emit(InstallEvent::LogLine {
+                    message: format!(
+                        "Skipping {} on resume; phase {} already completed",
+                        step.display_name, step.phase
+                    ),
+                })
+                .await;
+            continue;
+        }
+
         emit_step_started(session, event_sink, step).await;
 
         match step.id.as_str() {
@@ -511,12 +527,39 @@ async fn emit_step_finished(
         .await;
 }
 
+fn phase_rank(phase: InstallPhase) -> u8 {
+    match phase {
+        InstallPhase::ValidateEnvironment => 0,
+        InstallPhase::DiscoverAwsContext => 1,
+        InstallPhase::ResolveMetadata => 2,
+        InstallPhase::PrepareDeployment => 3,
+        InstallPhase::PlanDeployment => 4,
+        InstallPhase::ApplyDeployment => 5,
+        InstallPhase::WaitForResources => 6,
+        InstallPhase::Finalize => 7,
+        InstallPhase::PostInstall => 8,
+    }
+}
+
+fn phase_is_past(current: InstallPhase, target: InstallPhase) -> bool {
+    phase_rank(current) > phase_rank(target)
+}
+
+fn completed_apply_result(plan: &InstallPlan, session: &InstallSession) -> ApplyResult {
+    ApplyResult {
+        final_phase: InstallPhase::PostInstall,
+        artifacts: session.artifacts.clone(),
+        post_install_steps: plan.post_install_steps.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         adapter_option_to_tf_var, build_terraform_apply_command, build_terraform_init_command,
-        build_terraform_plan_command, parse_terraform_outputs,
+        build_terraform_plan_command, parse_terraform_outputs, phase_is_past,
     };
+    use crate::core::InstallPhase;
 
     #[test]
     fn terraform_init_command_uses_working_dir_and_non_interactive_flags() {
@@ -618,6 +661,26 @@ mod tests {
                 "/tmp/repo/tfplan",
             ]
         );
+    }
+
+    #[test]
+    fn resume_skips_only_completed_terraform_phases() {
+        assert!(phase_is_past(
+            InstallPhase::PlanDeployment,
+            InstallPhase::PrepareDeployment
+        ));
+        assert!(phase_is_past(
+            InstallPhase::PostInstall,
+            InstallPhase::ApplyDeployment
+        ));
+        assert!(!phase_is_past(
+            InstallPhase::ApplyDeployment,
+            InstallPhase::ApplyDeployment
+        ));
+        assert!(!phase_is_past(
+            InstallPhase::ApplyDeployment,
+            InstallPhase::PostInstall
+        ));
     }
 
     #[test]

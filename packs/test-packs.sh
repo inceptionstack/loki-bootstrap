@@ -205,8 +205,8 @@ for pack in "${PACKS[@]}"; do
     continue
   fi
 
-  # Check required manifest keys
-  for key in name version type description params provides; do
+  # Check required manifest keys from the current V2 schema
+  for key in schema_version id display_name description allowed_profiles supported_methods default_profile default_method default_region post_install required_env extra_options_schema; do
     if python3 -c "
 import yaml, sys
 data = yaml.safe_load(open('${MANIFEST}'))
@@ -218,15 +218,15 @@ sys.exit(0 if '${key}' in data else 1)
     fi
   done
 
-  # Verify name matches folder
+  # Verify id matches folder
   if python3 -c "
 import yaml, sys
 data = yaml.safe_load(open('${MANIFEST}'))
-sys.exit(0 if data.get('name') == '${pack}' else 1)
+sys.exit(0 if data.get('id') == '${pack}' else 1)
 " 2>/dev/null; then
-    pass "${pack}/manifest.yaml: name matches folder"
+    pass "${pack}/manifest.yaml: id matches folder"
   else
-    fail "${pack}/manifest.yaml: name does not match folder '${pack}'"
+    fail "${pack}/manifest.yaml: id does not match folder '${pack}'"
   fi
 done
 

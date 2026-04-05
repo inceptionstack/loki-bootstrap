@@ -46,10 +46,7 @@ This is correct. In bash, `$?` inside `else` preserves the actual exit code of t
 - hermes_model → HermesModel (String, has default) ✅
 - haiku_model → HaikuModel (String, has default) ✅
 - sandbox_name → SandboxName (String, has default) ✅
-- telegram_token → TelegramToken (NoEcho: true, default '') ✅
-- allowed_chat_ids → AllowedChatIds (String, default '') ✅
-
-**TF mappings mirror CFN.** `telegram_token` marked `sensitive = true`. Port validation in both CFN and TF.
+**TF mappings mirror CFN.** Port validation in both CFN and TF.
 
 **CFN safety for existing stacks:** All new parameters have defaults. update-stack won't break. ✅
 **TF backward compatibility:** All new variables have defaults. ✅

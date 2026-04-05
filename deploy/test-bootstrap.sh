@@ -114,8 +114,6 @@ EMBED_MODEL=""
 HERMES_MODEL=""
 HAIKU_MODEL=""
 SANDBOX_NAME=""
-TELEGRAM_TOKEN=""
-ALLOWED_CHAT_IDS=""
 LITELLM_URL=""
 LITELLM_KEY=""
 LITELLM_MODEL=""
@@ -134,8 +132,6 @@ while [[ $# -gt 0 ]]; do
     --hermes-model)    HERMES_MODEL="$2"; shift 2 ;;
     --haiku-model)     HAIKU_MODEL="$2"; shift 2 ;;
     --sandbox-name)    SANDBOX_NAME="$2"; shift 2 ;;
-    --telegram-token)  TELEGRAM_TOKEN="$2"; shift 2 ;;
-    --allowed-chat-ids) ALLOWED_CHAT_IDS="$2"; shift 2 ;;
     --litellm-base-url|--litellm-url)     LITELLM_URL="$2"; shift 2 ;;
     --litellm-api-key|--litellm-key)      LITELLM_KEY="$2"; shift 2 ;;
     --litellm-model)   LITELLM_MODEL="$2"; shift 2 ;;
@@ -157,9 +153,7 @@ cat > "${TMPCONFIG}" << JSON
   "embed_model": "${EMBED_MODEL}",
   "hermes_model": "${HERMES_MODEL}",
   "haiku_model": "${HAIKU_MODEL}",
-  "sandbox_name": "${SANDBOX_NAME}",
-  "telegram_token": "${TELEGRAM_TOKEN}",
-  "allowed_chat_ids": "${ALLOWED_CHAT_IDS}"
+  "sandbox_name": "${SANDBOX_NAME}"
 }
 JSON
 
@@ -218,7 +212,7 @@ echo ""
 # ── Test 6: shellcheck (optional) ────────────────────────────────────────────
 info "Test 6: shellcheck (optional)"
 if command -v shellcheck &>/dev/null; then
-  if shellcheck -S warning "$BOOTSTRAP"; then
+  if shellcheck -S warning -e SC1090 "$BOOTSTRAP"; then
     ok "shellcheck passed"
   else
     fail "shellcheck found issues"

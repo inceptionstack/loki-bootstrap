@@ -490,31 +490,32 @@ if [[ -f "$BOOTSTRAP_FILE" ]]; then
   fi
 fi
 
-# ── Section 11: install.sh has ProfileName in param arrays ───────────────────
-header "Test: install.sh ProfileName parameter plumbing"
+# ── Section 11: install.sh forwards profile + option to V2 ───────────────────
+header "Test: install.sh V2 argument plumbing"
 
-if grep -q "ProfileName" "$INSTALL_SH" 2>/dev/null; then
-  pass "install.sh: ProfileName found in source"
+if grep -q -- '--profile)' "$INSTALL_SH" 2>/dev/null; then
+  pass "install.sh: --profile arg parser found"
 else
-  fail_test "install.sh: ProfileName missing from source (not yet implemented)"
+  fail_test "install.sh: --profile arg parser missing"
 fi
 
-if grep -q "profile_name" "$INSTALL_SH" 2>/dev/null; then
-  pass "install.sh: profile_name found in source (TF param)"
+if grep -q 'V2_ARGS+=("--profile" "\$profile")' "$INSTALL_SH" 2>/dev/null; then
+  pass "install.sh: profile is forwarded to V2"
 else
-  fail_test "install.sh: profile_name missing from source (TF param)"
+  fail_test "install.sh: profile is not forwarded to V2"
 fi
 
-if grep -q "PRESELECT_PROFILE" "$INSTALL_SH" 2>/dev/null; then
-  pass "install.sh: PRESELECT_PROFILE variable found"
+if grep -q -- '--option)' "$INSTALL_SH" 2>/dev/null; then
+  pass "install.sh: --option arg parser found"
 else
-  fail_test "install.sh: PRESELECT_PROFILE variable missing"
+  fail_test "install.sh: --option arg parser missing"
 fi
 
-if grep -q "choose_profile" "$INSTALL_SH" 2>/dev/null; then
-  pass "install.sh: choose_profile() function found"
+if grep -q 'OPTION_ARGS' "$INSTALL_SH" 2>/dev/null && \
+   grep -q 'V2_ARGS+=("--option" "\$option")' "$INSTALL_SH" 2>/dev/null; then
+  pass "install.sh: --option values are forwarded to V2"
 else
-  fail_test "install.sh: choose_profile() function missing"
+  fail_test "install.sh: --option values are not forwarded to V2"
 fi
 
 # ── Section 12: bootstrap.sh has --profile ───────────────────────────────────
