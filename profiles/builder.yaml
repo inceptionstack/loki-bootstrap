@@ -1,0 +1,18 @@
+schema_version: 1
+id: builder
+display_name: Builder
+description: Full-access builder profile for development and operator workflows.
+supported_packs:
+  - openclaw
+  - claude-code
+  - hermes
+  - pi
+  - ironclaw
+  - kiro-cli
+default_method: cfn
+default_region: us-east-1
+config:
+  iam_profile_source: profiles/builder.json
+tags:
+  loki_profile: builder
+  loki_access: admin

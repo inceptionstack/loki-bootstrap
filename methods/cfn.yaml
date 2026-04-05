@@ -1,0 +1,16 @@
+schema_version: 1
+id: cfn
+display_name: CloudFormation
+description: Deploy through the shared CloudFormation template and stack lifecycle.
+requires_stack_name: true
+requires_region: true
+required_tools:
+  - aws
+supports_resume: true
+supports_uninstall: true
+input_schema:
+  capabilities:
+    value_type: string
+    required: false
+    default_value: CAPABILITY_NAMED_IAM
+    description: CloudFormation capabilities passed during stack operations.

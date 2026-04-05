@@ -1,0 +1,19 @@
+schema_version: 1
+id: account_assistant
+display_name: Account Assistant
+description: Constrained account-scoped assistant profile with Bedrock access.
+supported_packs:
+  - openclaw
+  - claude-code
+  - hermes
+  - pi
+  - ironclaw
+  - kiro-cli
+default_method: terraform
+default_region: us-east-1
+config:
+  deny_policy_path: profiles/account_assistant_deny.json
+  bedrock_policy_path: profiles/account_assistant_bedrock.json
+tags:
+  loki_profile: account_assistant
+  loki_access: constrained

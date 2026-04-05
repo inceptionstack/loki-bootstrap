@@ -1,0 +1,17 @@
+schema_version: 1
+id: terraform
+display_name: Terraform
+description: Deploy through the shared Terraform configuration.
+requires_stack_name: false
+requires_region: true
+required_tools:
+  - aws
+  - terraform
+supports_resume: true
+supports_uninstall: true
+input_schema:
+  workspace:
+    value_type: string
+    required: false
+    default_value: default
+    description: Terraform workspace name.

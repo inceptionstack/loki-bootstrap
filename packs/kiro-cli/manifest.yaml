@@ -1,35 +1,23 @@
-name: kiro-cli
-version: "1.0.0"
-type: agent
-description: "Kiro CLI — AWS agentic IDE terminal client with MCP server support (experimental)"
-
-deps: []
-
-requirements:
-  arch:
-    - arm64
-    - amd64
-  os:
-    - al2023
-    - ubuntu2204
-  min_instance_type: t4g.medium
-
-params:
-  - name: region
-    description: "AWS region (informational; Kiro CLI uses its own cloud inference)"
-    default: us-east-1
-
-health_check:
-  command: "kiro-cli --version"
-  timeout: 10
-
-provides:
-  commands:
-    - kiro-cli
-  services: []
-
-instance_type: t4g.medium
-root_volume_gb: 40
-data_volume_gb: 0
-
+schema_version: 1
+id: kiro-cli
+display_name: Kiro CLI
+description: AWS agentic IDE terminal client with MCP server support.
 experimental: true
+allowed_profiles:
+  - builder
+  - account_assistant
+supported_methods:
+  - cfn
+  - terraform
+default_profile: builder
+default_method: terraform
+default_region: us-east-1
+post_install:
+  - ssm_session
+required_env: []
+extra_options_schema:
+  region:
+    value_type: string
+    required: false
+    default_value: us-east-1
+    description: Informational region hint for Kiro CLI.

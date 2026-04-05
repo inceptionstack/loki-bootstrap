@@ -1,0 +1,177 @@
+use crate::core::{Planner, persist_session};
+use crate::tui::app::{AppLifecycle, AppState, ScreenId, screen_title};
+use crate::tui::events::InstallerEvent;
+use crate::tui::screens;
+use crate::tui::update::{AppAction, update};
+use color_eyre::Result;
+use crossterm::{
+    event::{self, Event},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
+use ratatui::{
+    Terminal,
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    style::{Modifier, Style},
+    widgets::{Block, Borders, Paragraph},
+};
+use std::io::{self, Stdout};
+
+pub async fn run(planner: Planner) -> Result<()> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    let mut state = AppState::default();
+
+    let mut pending = update(&mut state, InstallerEvent::AppStarted);
+    while state.lifecycle == AppLifecycle::Running {
+        run_actions(&planner, &mut state, &mut pending, &mut terminal).await?;
+        if event::poll(std::time::Duration::from_millis(250))? {
+            match event::read()? {
+                Event::Key(key) => {
+                    pending.extend(update(&mut state, InstallerEvent::KeyPressed(key)))
+                }
+                Event::Resize(width, height) => {
+                    pending.extend(update(&mut state, InstallerEvent::Resize { width, height }))
+                }
+                _ => {}
+            }
+        }
+    }
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+    Ok(())
+}
+
+async fn run_actions(
+    planner: &Planner,
+    state: &mut AppState,
+    pending: &mut Vec<AppAction>,
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+) -> Result<()> {
+    while let Some(action) = pending.pop() {
+        match action {
+            AppAction::Render => render(terminal, state)?,
+            AppAction::LoadPacks => {
+                let packs = planner.repo().load_all_packs().map_err(|e| e.to_string());
+                pending.extend(update(state, InstallerEvent::PacksLoaded(packs)));
+            }
+            AppAction::LoadProfiles { pack_id } => {
+                let result = planner
+                    .repo()
+                    .load_pack(&pack_id)
+                    .and_then(|pack| planner.repo().load_profiles_for_pack(&pack))
+                    .map_err(|e| e.to_string());
+                pending.extend(update(state, InstallerEvent::ProfilesLoaded(result)));
+            }
+            AppAction::LoadMethods { pack_id } => {
+                let result = planner
+                    .repo()
+                    .load_pack(&pack_id)
+                    .and_then(|pack| planner.repo().load_methods_for_pack(&pack))
+                    .map_err(|e| e.to_string());
+                pending.extend(update(state, InstallerEvent::MethodsLoaded(result)));
+            }
+            AppAction::RunDoctor => {
+                let report = planner.run_doctor(None).map_err(|e| e.to_string());
+                pending.extend(update(state, InstallerEvent::DoctorCompleted(report)));
+            }
+            AppAction::BuildPlan => {
+                let result = match state.request_draft.to_request() {
+                    Some(request) => planner.build_plan(request).await.map_err(|e| e.to_string()),
+                    None => Err("pack selection is incomplete".into()),
+                };
+                pending.extend(update(state, InstallerEvent::PlanBuilt(result)));
+            }
+            AppAction::StartDeploy => {
+                if let Some(plan) = state.plan.clone() {
+                    let session = planner.start_install(plan).await?;
+                    persist_session(&session)?;
+                    state.session = Some(session);
+                    pending.extend(update(
+                        state,
+                        InstallerEvent::DeployFinished(Ok(crate::core::ApplyResult {
+                            final_phase: crate::core::InstallPhase::PostInstall,
+                            artifacts: Default::default(),
+                            post_install_steps: vec![],
+                        })),
+                    ));
+                }
+            }
+            AppAction::Exit => {
+                state.lifecycle = AppLifecycle::Exiting;
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn render(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &AppState) -> Result<()> {
+    terminal.draw(|frame| {
+        let areas = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(frame.area());
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(22), Constraint::Min(20)])
+            .split(areas[0]);
+
+        let checklist = [
+            ScreenId::Welcome,
+            ScreenId::DoctorPreflight,
+            ScreenId::PackSelection,
+            ScreenId::ProfileSelection,
+            ScreenId::MethodSelection,
+            ScreenId::Review,
+            ScreenId::DeployProgress,
+            ScreenId::PostInstall,
+        ]
+        .iter()
+        .map(|screen| {
+            let marker = if *screen == state.screen { ">" } else { " " };
+            format!("{marker} {}", screen_title(*screen))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+        frame.render_widget(
+            Paragraph::new(checklist)
+                .block(Block::default().title("Checklist").borders(Borders::ALL)),
+            body[0],
+        );
+
+        let content = match state.screen {
+            ScreenId::Welcome => screens::welcome::content(),
+            ScreenId::DoctorPreflight => screens::preflight::content(state),
+            ScreenId::PackSelection => screens::pack_select::content(state),
+            ScreenId::ProfileSelection => screens::profile_select::content(state),
+            ScreenId::MethodSelection => screens::method_select::content(state),
+            ScreenId::Review => screens::review::content(state),
+            ScreenId::DeployProgress => screens::deploy::content(state),
+            ScreenId::PostInstall => screens::post_install::content(state),
+        };
+
+        frame.render_widget(
+            Paragraph::new(content).block(
+                Block::default()
+                    .title(screen_title(state.screen))
+                    .borders(Borders::ALL),
+            ),
+            body[1],
+        );
+
+        frame.render_widget(
+            Paragraph::new("Hints: Enter next | b back | q quit | arrows move")
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+            areas[1],
+        );
+    })?;
+    Ok(())
+}

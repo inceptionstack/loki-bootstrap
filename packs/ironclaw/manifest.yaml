@@ -1,36 +1,28 @@
-name: ironclaw
-version: "1.0.0"
-type: agent
-description: "IronClaw — Rust-based AI agent by NEAR AI (experimental)"
-
-deps:
-  - bedrockify
-
-requirements:
-  arch:
-    - arm64
-    - amd64
-  os:
-    - al2023
-    - ubuntu2204
-  min_instance_type: t4g.medium
-
-params:
-  - name: region
-    description: "AWS region for Bedrock"
-    default: us-east-1
-  - name: model
-    description: "Model ID for LLM_MODEL env var (passed through to bedrockify)"
-    default: "us.anthropic.claude-sonnet-4-6-v1"
-  - name: bedrockify-port
-    description: "Port where bedrockify is running"
-    default: "8090"
-
-health_check:
-  command: "ironclaw --version"
-  timeout: 10
-
-provides:
-  commands:
-    - ironclaw
-  services: []
+schema_version: 1
+id: ironclaw
+display_name: IronClaw
+description: Rust-based AI agent by NEAR AI.
+experimental: true
+allowed_profiles:
+  - builder
+  - account_assistant
+supported_methods:
+  - cfn
+  - terraform
+default_profile: builder
+default_method: terraform
+default_region: us-east-1
+post_install:
+  - ssm_session
+required_env: []
+extra_options_schema:
+  model:
+    value_type: string
+    required: false
+    default_value: us.anthropic.claude-sonnet-4-6-v1
+    description: Model identifier exported to IronClaw.
+  bedrockify_port:
+    value_type: integer
+    required: false
+    default_value: "8090"
+    description: bedrockify port for IronClaw.

@@ -1,0 +1,13 @@
+schema_version: 1
+id: personal_assistant
+display_name: Personal Assistant
+description: Least-privilege profile intended for personal assistant pack deployments.
+supported_packs:
+  - nemoclaw
+default_method: cfn
+default_region: us-east-1
+config:
+  policy_path: profiles/personal_assistant.json
+tags:
+  loki_profile: personal_assistant
+  loki_access: personal
