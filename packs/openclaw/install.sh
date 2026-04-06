@@ -115,6 +115,22 @@ fi
 OC_VERSION="$(openclaw --version 2>/dev/null || echo unknown)"
 ok "OpenClaw installed: ${OC_VERSION}"
 
+# ── Patch pi-coding-agent for AWS SDK (instance profile) auth ────────────────
+# pi-coding-agent's auth pre-flight rejects AWS SDK auth when no API key is set
+# (EC2 instance roles use IMDS, not env vars). Patch two files:
+#   1. model-registry.js: hasConfiguredAuth() must return true for amazon-bedrock
+#   2. agent-session.js: _getRequiredRequestAuth() must allow undefined apiKey for bedrock
+# These patches will be overwritten on OpenClaw update — upstream fix needed.
+step "Patching pi-coding-agent for Bedrock instance-profile auth"
+
+PATCH_SCRIPT="${SCRIPT_DIR}/resources/patch-pi-agent.py"
+if [[ -f "${PATCH_SCRIPT}" ]]; then
+  python3 "${PATCH_SCRIPT}" "${NODE_PREFIX}" && ok "pi-coding-agent patched for Bedrock auth" \
+    || warn "pi-coding-agent patch had warnings (see above)"
+else
+  warn "patch-pi-agent.py not found — skipping pi-coding-agent patches"
+fi
+
 # ── Workspace and state dir ───────────────────────────────────────────────────
 step "Workspace setup"
 mkdir -p "${HOME}/.openclaw/workspace"

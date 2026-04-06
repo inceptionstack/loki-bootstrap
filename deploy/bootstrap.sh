@@ -369,7 +369,7 @@ ok "System updated"
 
 # ---- Dependencies ----
 step "System Dependencies"
-dnf install -y git jq htop tmux gnupg2-minimal libatomic gettext python3-pip
+dnf install -y git jq htop tmux gnupg2-minimal libatomic gettext python3-pip dbus-tools
 ok "Packages installed"
 
 # Install aws-cfn-bootstrap for cfn-signal (not pre-installed on AL2023)
@@ -403,6 +403,10 @@ if [[ "${DATA_VOL_GB}" -gt 0 ]]; then
 else
   info "Pack requests no data volume — skipping mount"
 fi
+
+# ---- Enable systemd user session for ec2-user (needed by openclaw gateway) ----
+loginctl enable-linger ec2-user 2>/dev/null || true
+ok "Enabled loginctl linger for ec2-user"
 
 # ---- mise + Node.js (as ec2-user) ----
 step "mise + Node.js"
@@ -448,10 +452,12 @@ if [[ -f "$PACK_PROFILE" ]]; then
   PACK_BANNER_COMMANDS=""
   source "$PACK_PROFILE"
 
-  # Write AWS env vars + aliases to ec2-user .bashrc
+  # Write AWS env vars + D-Bus session + aliases to ec2-user .bashrc
   sudo -u ec2-user tee -a /home/ec2-user/.bashrc > /dev/null << ALIASES_BLOCK
 export AWS_PROFILE="\${AWS_PROFILE:-default}"
 export AWS_DEFAULT_REGION="\${AWS_DEFAULT_REGION:-${REGION}}"
+export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/\$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="\${DBUS_SESSION_BUS_ADDRESS:-unix:path=\${XDG_RUNTIME_DIR}/bus}"
 ${PACK_ALIASES}
 ALIASES_BLOCK
 
@@ -640,6 +646,9 @@ cat > /etc/profile.d/loki-aws.sh << AWSPROFILE
 # AWS credentials: ensure SDK default chain works (EC2 instance role via IMDS)
 export AWS_PROFILE="\${AWS_PROFILE:-default}"
 export AWS_DEFAULT_REGION="\${AWS_DEFAULT_REGION:-${REGION}}"
+# D-Bus + systemd user session: needed for openclaw gateway restart / systemctl --user
+export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/\$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="\${DBUS_SESSION_BUS_ADDRESS:-unix:path=\${XDG_RUNTIME_DIR}/bus}"
 AWSPROFILE
 chmod 644 /etc/profile.d/loki-aws.sh
 
