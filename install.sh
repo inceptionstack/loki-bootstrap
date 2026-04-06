@@ -1189,13 +1189,13 @@ show_summary() {
   esac
 
   local summary=""
+  summary+="Branch        ${REPO_BRANCH}\n"
+  summary+="Deploy via    ${deploy_method_label}\n"
   summary+="Account       ${ACCOUNT_ID}\n"
   summary+="Agent         ${PACK_NAME}\n"
   summary+="Profile       ${PROFILE_NAME}\n"
   summary+="Instance      ${INSTANCE_TYPE}\n"
   summary+="Region        ${DEPLOY_REGION}\n"
-  summary+="Branch        ${REPO_BRANCH}\n"
-  summary+="Deploy via    ${deploy_method_label}\n"
   [[ -n "${EXISTING_VPC_ID:-}" ]] && summary+="VPC           reuse ${EXISTING_VPC_ID}\n"
   summary+="Security      ${security_summary}\n"
   summary+="Environment   ${ENV_NAME}"
