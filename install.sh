@@ -486,6 +486,7 @@ preflight_checks() {
   echo ""
   echo -e "  ${BOLD}Account:${NC}  ${ACCOUNT_ID}"
   echo -e "  ${BOLD}Region:${NC}   ${REGION}"
+  echo -e "  ${BOLD}Branch:${NC}   ${REPO_BRANCH}  ${DIM}(used by EC2 bootstrap)${NC}"
   echo ""
 
   if [[ "$INSTALL_MODE" != "simple" ]]; then
@@ -1188,10 +1189,12 @@ show_summary() {
   esac
 
   local summary=""
+  summary+="Account       ${ACCOUNT_ID}\n"
   summary+="Agent         ${PACK_NAME}\n"
   summary+="Profile       ${PROFILE_NAME}\n"
   summary+="Instance      ${INSTANCE_TYPE}\n"
   summary+="Region        ${DEPLOY_REGION}\n"
+  summary+="Branch        ${REPO_BRANCH}\n"
   summary+="Deploy via    ${deploy_method_label}\n"
   [[ -n "${EXISTING_VPC_ID:-}" ]] && summary+="VPC           reuse ${EXISTING_VPC_ID}\n"
   summary+="Security      ${security_summary}\n"
