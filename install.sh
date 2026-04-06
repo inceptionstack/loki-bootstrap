@@ -44,11 +44,13 @@ show_debug_locations() {
 }
 
 # Ctrl-C: kill background jobs and exit immediately
-trap '
+cleanup_on_interrupt() {
   echo -e "\n\033[0;31m✗ Interrupted\033[0m" >&2
-  kill 0 2>/dev/null
+  # Kill all child processes (terraform, gum, tee, etc.)
+  kill -- -$$ 2>/dev/null || kill 0 2>/dev/null
   exit 130
-' INT
+}
+trap cleanup_on_interrupt INT TERM
 
 # Always show debug info on non-zero exit (EXIT trap is more reliable than ERR)
 trap '
@@ -1522,9 +1524,14 @@ EOF
 }
 
 terraform_init() {
-  # AWS provider is ~500MB — CloudShell /home is ~1GB. Use /tmp for plugin cache.
+  # Persistent plugin cache avoids re-downloading providers on every install.
+  # CloudShell: /home is ~1GB so use /tmp. Elsewhere: use ~/.terraform.d/plugin-cache.
   if [[ -z "${TF_PLUGIN_CACHE_DIR:-}" ]]; then
-    export TF_PLUGIN_CACHE_DIR="/tmp/terraform-plugin-cache"
+    if [[ "$IS_CLOUDSHELL" == "true" ]]; then
+      export TF_PLUGIN_CACHE_DIR="/tmp/terraform-plugin-cache"
+    else
+      export TF_PLUGIN_CACHE_DIR="${HOME}/.terraform.d/plugin-cache"
+    fi
   fi
   mkdir -p "$TF_PLUGIN_CACHE_DIR"
 
@@ -1548,14 +1555,23 @@ terraform_init() {
   info "Initializing Terraform (downloading providers)..."
   dbg "run_or_fail: Terraform init -> terraform init -input=false"
   local _init_log="/tmp/loki-tf-init-$$.log"
-  local rc=0
-  terraform init -input=false 2>&1 | tee "$_init_log" | while IFS= read -r line; do
+  : > "$_init_log"
+  terraform init -input=false > "$_init_log" 2>&1 &
+  local tf_pid=$!
+  # Stream log in foreground (interruptible by Ctrl-C)
+  tail -f "$_init_log" 2>/dev/null | while IFS= read -r line; do
     if   [[ "$line" == *"Installing"* ]];  then echo -e "  ${BLUE}▸${NC} ${line#"- "}"
     elif [[ "$line" == *"Installed"* ]];   then echo -e "  ${GREEN}✓${NC} ${line#"- "}"
     elif [[ "$line" == *"Initializing"* ]]; then echo -e "  ${DIM}${line}${NC}"
     elif [[ "$line" == *"Error"* || "$line" == *"error"* ]]; then echo -e "  ${RED}${line}${NC}"
     fi
-  done || rc=$?
+    # Stop tailing once terraform exits
+    kill -0 $tf_pid 2>/dev/null || break
+  done &
+  local tail_pid=$!
+  local rc=0
+  wait $tf_pid || rc=$?
+  kill $tail_pid 2>/dev/null; wait $tail_pid 2>/dev/null || true
   { echo "=== Terraform init (rc=$rc) ==="; cat "$_init_log"; echo ""; } >> "$INSTALL_LOG" 2>/dev/null
   if [[ $rc -ne 0 ]]; then
     warn "Terraform init failed:"
@@ -1584,21 +1600,29 @@ terraform_apply() {
   while IFS= read -r v; do
     tf_vars+=("$v")
   done < <(format_tf_vars)
-  # Stream terraform apply live — show progress as resources are created
+  # Stream terraform apply live — run in background so Ctrl-C works
   _TF_LOG="/tmp/loki-terraform-apply.log"
-  local rc=0
-  terraform apply -auto-approve "${tf_vars[@]}" 2>&1 | tee "$_TF_LOG" | while IFS= read -r line; do
+  : > "$_TF_LOG"
+  terraform apply -auto-approve "${tf_vars[@]}" > "$_TF_LOG" 2>&1 &
+  local tf_pid=$!
+  # Stream log in background, filter for interesting lines
+  tail -f "$_TF_LOG" 2>/dev/null | while IFS= read -r line; do
     if   [[ "$line" == *": Creating..."* ]];       then echo -e "  ${BLUE}+${NC} ${line##*] }"
     elif [[ "$line" == *": Creation complete"* ]];  then echo -e "  ${GREEN}✓${NC} ${line##*] }"
     elif [[ "$line" == *"Apply complete"* ]];       then echo -e "\n  ${GREEN}${line}${NC}"
     elif [[ "$line" == *"Outputs:"* ]] || [[ "$line" == *" = "* ]]; then echo "  $line"
     elif [[ "$line" == *"Error"* || "$line" == *"error"* ]]; then echo -e "  ${RED}${line}${NC}"
     fi
-  done || rc=$?
+    kill -0 $tf_pid 2>/dev/null || break
+  done &
+  local tail_pid=$!
+  local rc=0
+  wait $tf_pid || rc=$?
+  kill $tail_pid 2>/dev/null; wait $tail_pid 2>/dev/null || true
+  { echo "=== Terraform apply (rc=$rc) ==="; cat "$_TF_LOG"; echo ""; } >> "$INSTALL_LOG" 2>/dev/null
   if [[ $rc -ne 0 ]]; then
     echo ""
     warn "Terraform apply failed (exit code $rc)"
-    # Show last 40 lines in a formatted code block via gum
     local err_text
     err_text=$(tail -40 "$_TF_LOG")
     echo "$err_text" | $GUM format -t code

@@ -167,6 +167,7 @@ fi
 
 export NODE_BIN OC_MAIN GW_PORT GW_TOKEN NODE_PREFIX OC_VERSION
 export USER_HOME="${HOME}"
+export AWS_DEFAULT_REGION="${REGION}"
 envsubst < "${SERVICE_TPL}" > "${HOME}/.config/systemd/user/openclaw-gateway.service"
 chmod 600 "${HOME}/.config/systemd/user/openclaw-gateway.service"
 ok "Service unit written"

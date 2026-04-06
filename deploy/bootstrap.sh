@@ -448,8 +448,10 @@ if [[ -f "$PACK_PROFILE" ]]; then
   PACK_BANNER_COMMANDS=""
   source "$PACK_PROFILE"
 
-  # Write aliases to ec2-user .bashrc
+  # Write AWS env vars + aliases to ec2-user .bashrc
   sudo -u ec2-user tee -a /home/ec2-user/.bashrc > /dev/null << ALIASES_BLOCK
+export AWS_PROFILE="\${AWS_PROFILE:-default}"
+export AWS_DEFAULT_REGION="\${AWS_DEFAULT_REGION:-${REGION}}"
 ${PACK_ALIASES}
 ALIASES_BLOCK
 
