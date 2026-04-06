@@ -1359,30 +1359,66 @@ deploy_cfn_stack() {
 }
 
 wait_for_cfn_stack() {
-  local iterations=0 max_iterations=120  # 120 x 15s = 30 minutes
   local start_time=$SECONDS
+  local seen_events=""
+  local max_wait=1800  # 30 minutes
+
   while true; do
-    local status rc=0
-    status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$DEPLOY_REGION" \
+    local elapsed=$(( SECONDS - start_time ))
+    if [[ $elapsed -ge $max_wait ]]; then
+      warn "Timed out after 30 minutes. Check the CloudFormation console for status."
+      break
+    fi
+
+    # Fetch recent stack events (newest first), show unseen ones
+    local events_json
+    events_json=$(aws cloudformation describe-stack-events \
+      --stack-name "$STACK_NAME" --region "$DEPLOY_REGION" \
+      --query 'StackEvents[0:20].[EventId,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+      --output json 2>/dev/null) || true
+
+    if [[ -n "$events_json" ]]; then
+      # Process events in reverse (oldest first) so they appear chronologically
+      local count
+      count=$(echo "$events_json" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
+      for (( i=count-1; i>=0; i-- )); do
+        local event_id resource status reason
+        event_id=$(echo "$events_json" | python3 -c "import sys,json; e=json.load(sys.stdin)[$i]; print(e[0])" 2>/dev/null)
+        [[ -z "$event_id" ]] && continue
+        # Skip already-seen events
+        if [[ "$seen_events" == *"$event_id"* ]]; then continue; fi
+        seen_events+=" $event_id"
+
+        resource=$(echo "$events_json" | python3 -c "import sys,json; e=json.load(sys.stdin)[$i]; print(e[1])" 2>/dev/null)
+        status=$(echo "$events_json" | python3 -c "import sys,json; e=json.load(sys.stdin)[$i]; print(e[2])" 2>/dev/null)
+        reason=$(echo "$events_json" | python3 -c "import sys,json; e=json.load(sys.stdin)[$i]; print(e[3] or '')" 2>/dev/null)
+
+        case "$status" in
+          *COMPLETE)      echo -e "  ${GREEN}✓${NC} ${resource} ${DIM}${status}${NC}" ;;
+          *IN_PROGRESS)   echo -e "  ${BLUE}+${NC} ${resource} ${DIM}${status}${NC}" ;;
+          *FAILED*|*ROLLBACK*)
+            echo -e "  ${RED}✗${NC} ${resource} ${status}"
+            [[ -n "$reason" ]] && echo -e "    ${RED}${reason}${NC}"
+            ;;
+        esac
+      done
+    fi
+
+    # Check overall stack status
+    local stack_status rc=0
+    stack_status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$DEPLOY_REGION" \
       --query 'Stacks[0].StackStatus' --output text 2>&1) || rc=$?
     if [[ $rc -ne 0 ]]; then
-      echo ""; fail "Stack no longer exists or is inaccessible: $status"
+      echo ""; fail "Stack no longer exists or is inaccessible: $stack_status"
     fi
-    local elapsed=$(( SECONDS - start_time ))
+
     local elapsed_str; elapsed_str=$(elapsed_fmt $elapsed)
-    case "$status" in
-      CREATE_COMPLETE)     printf "\r%-60s\r" ""; ok "Stack created! ${DIM}(${elapsed_str})${NC}"; break ;;
-      *FAILED*|*ROLLBACK*) printf "\r%-60s\r" ""; fail "Stack failed: $status" ;;
-      *)
-        iterations=$((iterations + 1))
-        if [[ $iterations -ge $max_iterations ]]; then
-          printf "\r%-60s\r" ""
-          warn "Timed out after 30 minutes waiting for stack. Check the CloudFormation console for status."
-          break
-        fi
-        animate_spinner 15 "$status"
-        ;;
+    case "$stack_status" in
+      CREATE_COMPLETE)     echo ""; ok "Stack created! ${DIM}(${elapsed_str})${NC}"; break ;;
+      *FAILED*|*ROLLBACK_COMPLETE) echo ""; fail "Stack failed: $stack_status" ;;
     esac
+
+    sleep 10
   done
 }
 
