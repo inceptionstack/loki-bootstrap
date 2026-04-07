@@ -332,7 +332,6 @@ else
   warn "pgvector extension not detected — semantic search may not work"
 fi
 
-# ── Done ─────────────────────────────────────────────────────────────────────
 # ── Fix systemd service unit ─────────────────────────────────────────────────
 step "Configuring systemd service"
 
@@ -363,6 +362,8 @@ sudo loginctl enable-linger "${IC_DB_USER}" 2>/dev/null || true
 systemctl --user daemon-reload 2>/dev/null || true
 systemctl --user enable ironclaw 2>/dev/null || true
 ok "Systemd service installed with EnvironmentFile + --no-onboard"
+
+# ── Done ─────────────────────────────────────────────────────────────────────
 write_done_marker "ironclaw"
 printf "\n[PACK:ironclaw] INSTALLED — ironclaw CLI ready\n"
 printf "  model: %s via bedrockify:%s\n" "${MODEL}" "${BEDROCKIFY_PORT}"
