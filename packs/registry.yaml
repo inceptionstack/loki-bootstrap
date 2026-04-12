@@ -19,6 +19,8 @@ packs:
     type: agent
     description: "Claude Code — Anthropic's coding agent with native Bedrock support"
     deps: []
+    supported_providers:
+      - bedrock
     instance_type: t4g.large
     root_volume_gb: 40
     data_volume_gb: 0
@@ -33,6 +35,11 @@ packs:
     description: "OpenClaw — stateful AI agent with persistent gateway"
     deps:
       - bedrockify
+    supported_providers:
+      - bedrock
+      - anthropic-api
+      - openai-api
+      - litellm
     instance_type: t4g.xlarge
     root_volume_gb: 40
     data_volume_gb: 80
@@ -48,6 +55,8 @@ packs:
     description: "Hermes — NousResearch CLI agent via bedrockify (experimental)"
     deps:
       - bedrockify
+    supported_providers:
+      - bedrock
     instance_type: t4g.medium
     root_volume_gb: 40
     data_volume_gb: 0
@@ -62,6 +71,8 @@ packs:
     description: "Pi — minimal terminal coding harness (experimental)"
     deps:
       - bedrockify
+    supported_providers:
+      - bedrock
     instance_type: t4g.medium
     root_volume_gb: 40
     data_volume_gb: 0
@@ -76,6 +87,8 @@ packs:
     description: "IronClaw — Rust-based AI agent by NEAR AI (experimental)"
     deps:
       - bedrockify
+    supported_providers:
+      - bedrock
     instance_type: t4g.medium
     root_volume_gb: 40
     data_volume_gb: 0
@@ -90,6 +103,8 @@ packs:
     description: "NemoClaw — OpenClaw in sandboxed OpenShell with Bedrock inference"
     deps:
       - bedrockify
+    supported_providers:
+      - bedrock
     instance_type: t4g.xlarge       # NemoClaw requires 4 vCPU / 8GB+ RAM
     root_volume_gb: 40
     data_volume_gb: 80
@@ -106,6 +121,8 @@ packs:
     type: agent
     description: "Kiro CLI — AWS agentic IDE terminal client with MCP server support (experimental)"
     deps: []
+    supported_providers:
+      - bedrock
     instance_type: t4g.medium
     root_volume_gb: 40
     data_volume_gb: 0

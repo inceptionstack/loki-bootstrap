@@ -1,0 +1,49 @@
+schemaVersion: v1
+name: openrouter
+displayName: OpenRouter
+kind: llm-provider
+
+auth:
+  method: api-key
+  modes:
+    - api-key
+  defaultMode: api-key
+  requiredEnv:
+    - OPENROUTER_API_KEY
+  optionalEnv:
+    - OPENROUTER_HTTP_REFERER
+    - OPENROUTER_X_TITLE
+  secretSources:
+    - env
+
+connection:
+  transport: openai-compatible
+  api: chat-completions
+  baseUrlTemplate: "https://openrouter.ai/api/v1"
+  regionRequired: false
+
+defaults:
+  primaryModel: anthropic/claude-opus-4.1
+  fallbackModel: anthropic/claude-sonnet-4
+  heartbeatModel: anthropic/claude-sonnet-4
+
+models:
+  - id: anthropic/claude-opus-4.1
+    name: Claude Opus 4.1 via OpenRouter
+    contextWindow: 200000
+    maxTokens: 16384
+    reasoning: true
+    inputTypes:
+      - text
+      - image
+  - id: anthropic/claude-sonnet-4
+    name: Claude Sonnet 4 via OpenRouter
+    contextWindow: 200000
+    maxTokens: 16384
+    reasoning: true
+    inputTypes:
+      - text
+      - image
+
+compatibility:
+  packs: []

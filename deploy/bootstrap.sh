@@ -91,15 +91,17 @@ Required:
   --pack <name>     Pack to install (e.g. openclaw, hermes)
 
 Common options:
-  --region <r>      AWS region for Bedrock        (default: us-east-1)
-  --model <id>      Default Bedrock model ID
+  --region <r>      AWS region for provider use   (default: us-east-1)
+  --provider <name> LLM provider                  (default: bedrock)
+  --model <id>      Override primary model ID
   --help            Show this help message
 
 All --key value arguments are forwarded to pack install.sh scripts.
 Packs silently ignore arguments they don't recognise.
 
 Examples:
-  $(basename "$0") --pack openclaw --region us-east-1 --model us.anthropic.claude-opus-4-6-v1
+  $(basename "$0") --pack openclaw --provider bedrock --region us-east-1
+  $(basename "$0") --pack openclaw --provider anthropic-api --model claude-opus-4-6-20250514
   $(basename "$0") --pack hermes   --region eu-west-1
 
 Environment:
@@ -117,12 +119,15 @@ STACK_NAME="${STACK_NAME:-}"
 MODEL=""
 GW_PORT=""
 MODEL_MODE=""
+PROVIDER="bedrock"
 BEDROCKIFY_PORT=""
 HERMES_MODEL=""
 LITELLM_URL=""
 LITELLM_KEY=""
 LITELLM_MODEL=""
 PROVIDER_KEY=""
+PROVIDER_SET=0
+MODEL_MODE_SET=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -150,6 +155,12 @@ while [[ $# -gt 0 ]]; do
       MODEL="$2"
       shift 2
       ;;
+    --provider)
+      [[ $# -gt 1 ]] || { echo "ERROR: --provider requires a value" >&2; exit 1; }
+      PROVIDER="$2"
+      PROVIDER_SET=1
+      shift 2
+      ;;
     --gw-port)
       [[ $# -gt 1 ]] || { echo "ERROR: --gw-port requires a value" >&2; exit 1; }
       GW_PORT="$2"
@@ -158,6 +169,7 @@ while [[ $# -gt 0 ]]; do
     --model-mode)
       [[ $# -gt 1 ]] || { echo "ERROR: --model-mode requires a value" >&2; exit 1; }
       MODEL_MODE="$2"
+      MODEL_MODE_SET=1
       shift 2
       ;;
     --bedrockify-port)
@@ -211,30 +223,56 @@ if [[ -z "$PACK_NAME" ]]; then
   exit 1
 fi
 
+if [[ "${MODEL_MODE_SET}" -eq 1 ]]; then
+  echo "[WARN]  $(date -u '+%H:%M:%S') --model-mode is deprecated; use --provider instead" >&2
+  if [[ "${PROVIDER_SET}" -eq 0 ]]; then
+    case "${MODEL_MODE}" in
+      bedrock) PROVIDER="bedrock" ;;
+      litellm) PROVIDER="litellm" ;;
+      api-key) PROVIDER="anthropic-api" ;;
+      *)
+        echo "ERROR: unsupported legacy --model-mode '${MODEL_MODE}'" >&2
+        exit 1
+        ;;
+    esac
+  fi
+fi
+
+LEGACY_MODEL_MODE="${MODEL_MODE}"
+if [[ -z "${LEGACY_MODEL_MODE}" ]]; then
+  case "${PROVIDER}" in
+    bedrock) LEGACY_MODEL_MODE="bedrock" ;;
+    litellm) LEGACY_MODEL_MODE="litellm" ;;
+    *) LEGACY_MODEL_MODE="api-key" ;;
+  esac
+fi
+
 # ── Write pack config JSON ────────────────────────────────────────────────────
 PACK_CONFIG="/tmp/loki-pack-config.json"
+PACK_CONFIG_TMP="${PACK_CONFIG}.tmp"
 jq -n \
   --arg pack "$PACK_NAME" \
   --arg profile "$PROFILE_NAME" \
   --arg region "$REGION" \
   --arg model "$MODEL" \
   --arg gw_port "$GW_PORT" \
-  --arg model_mode "$MODEL_MODE" \
+  --arg model_mode "$LEGACY_MODEL_MODE" \
   --arg bedrockify_port "$BEDROCKIFY_PORT" \
   --arg hermes_model "$HERMES_MODEL" \
   --arg litellm_url "$LITELLM_URL" \
-  --arg litellm_key "$LITELLM_KEY" \
   --arg litellm_model "$LITELLM_MODEL" \
-  --arg provider_key "$PROVIDER_KEY" \
+  --arg provider_name "$PROVIDER" \
   '{pack:$pack, profile:$profile, region:$region, model:$model, gw_port:$gw_port,
     model_mode:$model_mode, bedrockify_port:$bedrockify_port,
     hermes_model:$hermes_model, litellm_url:$litellm_url,
-    litellm_key:$litellm_key, litellm_model:$litellm_model,
-    provider_key:$provider_key}' > "${PACK_CONFIG}"
+    litellm_model:$litellm_model, provider_name:$provider_name}' > "${PACK_CONFIG_TMP}"
+mv "${PACK_CONFIG_TMP}" "${PACK_CONFIG}"
 chmod 600 "${PACK_CONFIG}"
-chown ec2-user:ec2-user "${PACK_CONFIG}"
+chown ec2-user:ec2-user "${PACK_CONFIG}" 2>/dev/null || true
 export PACK_CONFIG
 export AWS_DEFAULT_REGION="${REGION}"
+export LITELLM_KEY_ENV="${LITELLM_KEY}"
+export PROVIDER_KEY_ENV="${PROVIDER_KEY}"
 
 # ── Locate repo root ──────────────────────────────────────────────────────────
 # bootstrap.sh lives in deploy/, one level above repo root
@@ -244,7 +282,7 @@ PACKS_DIR="${REPO_DIR}/packs"
 REGISTRY="${PACKS_DIR}/registry.yaml"
 
 step "Bootstrap Dispatcher"
-info "Pack: ${PACK_NAME} | Profile: ${PROFILE_NAME:-unset} | Region: ${REGION}${STACK_NAME:+ | Stack: $STACK_NAME}"
+info "Pack: ${PACK_NAME} | Profile: ${PROFILE_NAME:-unset} | Provider: ${PROVIDER} | Region: ${REGION}${STACK_NAME:+ | Stack: $STACK_NAME}"
 info "Repo: ${REPO_DIR}"
 info "Instance: $(get_instance_id)"
 
@@ -263,6 +301,33 @@ if ! grep -q "^  ${PACK_NAME}:" "$REGISTRY"; then
 fi
 
 ok "Pack '${PACK_NAME}' found in registry"
+
+# ── Resolve provider block ────────────────────────────────────────────────────
+step "Provider Resolution"
+PROVIDER_RESOLVER="${REPO_DIR}/providers/resolve.py"
+if [[ ! -f "${PROVIDER_RESOLVER}" ]]; then
+  fail "Provider resolver not found: ${PROVIDER_RESOLVER}"
+  exit 1
+fi
+
+PROVIDER_RESOLVE_ARGS=(
+  --pack "${PACK_NAME}"
+  --provider "${PROVIDER}"
+  --region "${REGION}"
+  --config "${PACK_CONFIG}"
+)
+if [[ -n "${MODEL}" ]]; then
+  PROVIDER_RESOLVE_ARGS+=(--model "${MODEL}")
+fi
+if [[ -n "${PROVIDER_KEY}" ]]; then
+  PROVIDER_RESOLVE_ARGS+=(--provider-key "${PROVIDER_KEY}")
+fi
+
+python3 "${PROVIDER_RESOLVER}" "${PROVIDER_RESOLVE_ARGS[@]}"
+
+chmod 600 "${PACK_CONFIG}"
+chown ec2-user:ec2-user "${PACK_CONFIG}" 2>/dev/null || true
+ok "Provider config resolved (${PROVIDER})"
 
 # ── Registry helpers (grep/awk only — no python yaml) ─────────────────────────
 # registry_get_flag PACK FIELD — returns "true" or "" for boolean fields
@@ -464,6 +529,7 @@ if [[ -f "$PACK_PROFILE" ]]; then
   PACK_BANNER_NAME="${PACK_NAME}"
   PACK_BANNER_EMOJI="🤖"
   PACK_BANNER_COMMANDS=""
+  # shellcheck source=/dev/null
   source "$PACK_PROFILE"
 
   # Write AWS env vars + D-Bus session + aliases to ec2-user .bashrc
@@ -557,7 +623,7 @@ for dep in "${DEPS[@]}"; do
   fi
   info "Installing dependency: ${dep}"
   # Run as ec2-user with mise/node on PATH; PACK_CONFIG is auto-detected by packs
-  sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS bash -c '
+  sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,LITELLM_KEY_ENV,PROVIDER_KEY_ENV bash -c '
     export PATH="/home/ec2-user/.local/bin:$PATH"
     eval "$(/home/ec2-user/.local/bin/mise activate bash 2>/dev/null)" 2>/dev/null || true
     NODE_PREFIX=$(npm prefix -g 2>/dev/null || true)
@@ -577,7 +643,7 @@ if [[ ! -f "$PACK_INSTALL" ]]; then
   exit 1
 fi
 info "Installing pack: ${PACK_NAME}"
-sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS bash -c '
+sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,LITELLM_KEY_ENV,PROVIDER_KEY_ENV bash -c '
   export PATH="/home/ec2-user/.local/bin:$PATH"
   eval "$(/home/ec2-user/.local/bin/mise activate bash 2>/dev/null)" 2>/dev/null || true
   NODE_PREFIX=$(npm prefix -g 2>/dev/null || true)
@@ -651,6 +717,7 @@ _SSM_BANNER_EMOJI="🤖"
 _SSM_BANNER_NAME="Agent Environment"
 _SSM_BANNER_COMMANDS="  (no commands configured for this pack)"
 if [[ -f "$PACK_PROFILE" ]]; then
+  # shellcheck source=/dev/null
   source "$PACK_PROFILE"
   _SSM_BANNER_EMOJI="${PACK_BANNER_EMOJI}"
   _SSM_BANNER_NAME="${PACK_BANNER_NAME}"

@@ -1,0 +1,48 @@
+schemaVersion: v1
+name: anthropic-api
+displayName: Anthropic API
+kind: llm-provider
+
+auth:
+  method: api-key
+  modes:
+    - api-key
+  defaultMode: api-key
+  requiredEnv:
+    - ANTHROPIC_API_KEY
+  optionalEnv: []
+  secretSources:
+    - env
+
+connection:
+  transport: native
+  api: messages
+  baseUrlTemplate: "https://api.anthropic.com"
+  regionRequired: false
+
+defaults:
+  primaryModel: claude-opus-4-6-20250514
+  fallbackModel: claude-sonnet-4-6-20250514
+  heartbeatModel: claude-sonnet-4-6-20250514
+
+models:
+  - id: claude-opus-4-6-20250514
+    name: Claude Opus 4.6
+    contextWindow: 200000
+    maxTokens: 16384
+    reasoning: true
+    inputTypes:
+      - text
+      - image
+  - id: claude-sonnet-4-6-20250514
+    name: Claude Sonnet 4.6
+    contextWindow: 200000
+    maxTokens: 16384
+    reasoning: true
+    inputTypes:
+      - text
+      - image
+
+compatibility:
+  packs:
+    - openclaw

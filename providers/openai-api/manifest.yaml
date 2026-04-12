@@ -1,0 +1,48 @@
+schemaVersion: v1
+name: openai-api
+displayName: OpenAI API
+kind: llm-provider
+
+auth:
+  method: api-key
+  modes:
+    - api-key
+  defaultMode: api-key
+  requiredEnv:
+    - OPENAI_API_KEY
+  optionalEnv: []
+  secretSources:
+    - env
+
+connection:
+  transport: native
+  api: responses
+  baseUrlTemplate: "https://api.openai.com/v1"
+  regionRequired: false
+
+defaults:
+  primaryModel: gpt-4.1
+  fallbackModel: gpt-4.1-mini
+  heartbeatModel: gpt-4.1-mini
+
+models:
+  - id: gpt-4.1
+    name: GPT-4.1
+    contextWindow: 1000000
+    maxTokens: 32768
+    reasoning: true
+    inputTypes:
+      - text
+      - image
+  - id: gpt-4.1-mini
+    name: GPT-4.1 Mini
+    contextWindow: 1000000
+    maxTokens: 32768
+    reasoning: true
+    inputTypes:
+      - text
+      - image
+
+compatibility:
+  packs:
+    - openclaw

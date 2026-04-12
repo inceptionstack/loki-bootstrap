@@ -1,0 +1,56 @@
+schemaVersion: v1
+name: bedrock
+displayName: AWS Bedrock
+kind: llm-provider
+
+auth:
+  method: aws-sdk
+  modes:
+    - iam
+    - bearer
+  defaultMode: iam
+  requiredEnv: []
+  optionalEnv:
+    - AWS_REGION
+    - AWS_DEFAULT_REGION
+  secretSources:
+    - env
+
+connection:
+  transport: native
+  api: bedrock-converse-stream
+  baseUrlTemplate: "https://bedrock-runtime.${region}.amazonaws.com"
+  regionRequired: true
+
+defaults:
+  primaryModel: global.anthropic.claude-opus-4-6-v1
+  fallbackModel: global.anthropic.claude-sonnet-4-6
+  heartbeatModel: global.anthropic.claude-sonnet-4-6
+
+models:
+  - id: global.anthropic.claude-opus-4-6-v1
+    name: Claude Opus 4.6
+    contextWindow: 200000
+    maxTokens: 16384
+    reasoning: true
+    inputTypes:
+      - text
+      - image
+  - id: global.anthropic.claude-sonnet-4-6
+    name: Claude Sonnet 4.6
+    contextWindow: 200000
+    maxTokens: 16384
+    reasoning: true
+    inputTypes:
+      - text
+      - image
+
+compatibility:
+  packs:
+    - openclaw
+    - hermes
+    - pi
+    - ironclaw
+    - nemoclaw
+    - claude-code
+    - kiro-cli

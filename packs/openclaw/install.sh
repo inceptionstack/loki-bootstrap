@@ -23,14 +23,15 @@ source "${SCRIPT_DIR}/../common.sh"
 # ── Defaults ──────────────────────────────────────────────────────────────────
 # Defaults from config file (written by bootstrap dispatcher), then CLI overrides
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
-PACK_ARG_MODEL="$(pack_config_get model "us.anthropic.claude-opus-4-6-v1")"
+PACK_ARG_PROVIDER="$(pack_config_get provider.name "$(pack_config_get provider_name "bedrock")")"
+PACK_ARG_MODEL="$(pack_config_get provider.model_roles.primary "$(pack_config_get model "global.anthropic.claude-opus-4-6-v1")")"
 PACK_ARG_PORT="$(pack_config_get gw_port "3001")"
 PACK_ARG_TOKEN="$(pack_config_get gw_token "")"
 PACK_ARG_MODEL_MODE="$(pack_config_get model_mode "bedrock")"
 PACK_ARG_LITELLM_URL="$(pack_config_get litellm_url "")"
-PACK_ARG_LITELLM_KEY="$(pack_config_get litellm_key "")"
-PACK_ARG_LITELLM_MODEL="$(pack_config_get litellm_model "claude-opus-4-6")"
-PACK_ARG_PROVIDER_KEY="$(pack_config_get provider_key "")"
+PACK_ARG_LITELLM_KEY="${LITELLM_KEY_ENV:-$(pack_config_get litellm_key "")}"
+PACK_ARG_LITELLM_MODEL="$(pack_config_get provider.model_roles.primary "$(pack_config_get litellm_model "claude-opus-4-6")")"
+PACK_ARG_PROVIDER_KEY="${PROVIDER_KEY_ENV:-$(pack_config_get provider_key "")}"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 usage() {
@@ -41,7 +42,7 @@ Install OpenClaw and configure the gateway service.
 
 Options:
   --region         AWS region for Bedrock         (default: us-east-1)
-  --model          Default Bedrock model ID        (default: us.anthropic.claude-opus-4-6-v1)
+  --model          Override primary model ID
   --port           Gateway port                    (default: 3001)
   --token          Gateway auth token              (default: auto-generated)
   --model-mode     bedrock | litellm | api-key   (default: bedrock)
@@ -75,6 +76,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 REGION="${PACK_ARG_REGION}"
+PROVIDER="${PACK_ARG_PROVIDER}"
 MODEL="${PACK_ARG_MODEL}"
 GW_PORT="${PACK_ARG_PORT}"
 GW_TOKEN="${PACK_ARG_TOKEN}"
@@ -85,7 +87,7 @@ LITELLM_MODEL="${PACK_ARG_LITELLM_MODEL}"
 PROVIDER_KEY="${PACK_ARG_PROVIDER_KEY}"
 
 pack_banner "openclaw"
-log "region=${REGION} model=${MODEL} port=${GW_PORT} mode=${MODEL_MODE}"
+log "provider=${PROVIDER} region=${REGION} model=${MODEL} port=${GW_PORT} mode=${MODEL_MODE}"
 
 # ── Prerequisites ─────────────────────────────────────────────────────────────
 step "Checking prerequisites"
@@ -152,20 +154,29 @@ if [[ ! -f "${CONFIG_GEN}" ]]; then
   fail "config-gen.py not found at ${CONFIG_GEN}"
 fi
 
-GW_TOKEN_ENV="${GW_TOKEN}" LITELLM_KEY_ENV="${LITELLM_KEY}" PROVIDER_KEY_ENV="${PROVIDER_KEY}" \
-python3 "${CONFIG_GEN}" \
-  "${REGION}"        \
-  "${MODEL}"         \
-  "${GW_PORT}"       \
-  ""                 \
-  "${MODEL_MODE}"    \
-  "${LITELLM_URL}"   \
-  ""                 \
-  "${LITELLM_MODEL}" \
-  ""
+export GW_TOKEN_ENV="${GW_TOKEN}"
+export LITELLM_KEY_ENV="${LITELLM_KEY}"
+export PROVIDER_KEY_ENV="${PROVIDER_KEY}"
+
+if [[ -n "${PACK_CONFIG:-}" && -f "${PACK_CONFIG}" ]]; then
+  python3 "${CONFIG_GEN}" --config "${PACK_CONFIG}"
+elif [[ -f /tmp/loki-pack-config.json ]]; then
+  python3 "${CONFIG_GEN}" --config /tmp/loki-pack-config.json
+else
+  python3 "${CONFIG_GEN}" \
+    "${REGION}"        \
+    "${MODEL}"         \
+    "${GW_PORT}"       \
+    ""                 \
+    "${MODEL_MODE}"    \
+    "${LITELLM_URL}"   \
+    ""                 \
+    "${LITELLM_MODEL}" \
+    ""
+fi
 
 chmod 600 "${HOME}/.openclaw/openclaw.json"
-ok "Config written and secured (mode=${MODEL_MODE})"
+ok "Config written and secured (provider=${PROVIDER})"
 
 # ── Install systemd user service ──────────────────────────────────────────────
 step "Installing systemd user service"

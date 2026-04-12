@@ -91,7 +91,13 @@ if command -v jq &>/dev/null; then
   "region": "eu-west-2",
   "model": "us.anthropic.claude-sonnet-4-6",
   "gw_port": "4000",
-  "hermes_model": "anthropic/claude-sonnet-4.6"
+  "hermes_model": "anthropic/claude-sonnet-4.6",
+  "provider": {
+    "name": "bedrock",
+    "model_roles": {
+      "primary": "global.anthropic.claude-opus-4-6-v1"
+    }
+  }
 }
 JSONEOF
 
@@ -109,6 +115,14 @@ JSONEOF
     pass "pack_config_get: reads hermes_model key correctly"
   else
     fail "pack_config_get: expected 'anthropic/claude-sonnet-4.6', got '${_val}'"
+  fi
+
+  # Test: reads nested dotted-path keys
+  _val=$(PACK_CONFIG="${TMPCONFIG}" bash -c "source '${COMMON}'; pack_config_get provider.model_roles.primary 'default-model'")
+  if [[ "${_val}" == "global.anthropic.claude-opus-4-6-v1" ]]; then
+    pass "pack_config_get: reads dotted provider key correctly"
+  else
+    fail "pack_config_get: expected dotted key value, got '${_val}'"
   fi
 
   # Test: returns default when key is missing from JSON

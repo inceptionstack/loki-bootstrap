@@ -57,8 +57,15 @@ pack_config_get() {
   local config="${PACK_CONFIG:-/tmp/loki-pack-config.json}"
   if [[ -f "$config" ]] && command -v jq &>/dev/null; then
     local val
-    val=$(jq -r --arg k "$key" '.[$k] // empty' "$config" 2>/dev/null)
-    if [[ -n "$val" ]]; then
+    local jq_path
+    jq_path=$(printf '%s' "$key" | awk -F. '{
+      printf "."
+      for (i = 1; i <= NF; i++) {
+        printf "[\"%s\"]", $i
+      }
+    }')
+    val=$(jq -r "${jq_path} // empty" "$config" 2>/dev/null)
+    if [[ -n "$val" && "$val" != "null" ]]; then
       echo "$val"
       return
     fi

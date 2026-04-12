@@ -1,0 +1,49 @@
+schemaVersion: v1
+name: litellm
+displayName: LiteLLM
+kind: llm-provider
+
+auth:
+  method: proxy
+  modes:
+    - proxy
+  defaultMode: proxy
+  requiredEnv: []
+  optionalEnv:
+    - LITELLM_API_KEY
+    - LITELLM_BASE_URL
+  secretSources:
+    - env
+
+connection:
+  transport: openai-compatible
+  api: openai-completions
+  baseUrlTemplate: ""
+  regionRequired: false
+
+defaults:
+  primaryModel: claude-opus-4-6
+  fallbackModel: claude-sonnet-4-6
+  heartbeatModel: claude-sonnet-4-6
+
+models:
+  - id: claude-opus-4-6
+    name: Claude Opus 4.6
+    contextWindow: 200000
+    maxTokens: 64000
+    reasoning: true
+    inputTypes:
+      - text
+      - image
+  - id: claude-sonnet-4-6
+    name: Claude Sonnet 4.6
+    contextWindow: 200000
+    maxTokens: 64000
+    reasoning: true
+    inputTypes:
+      - text
+      - image
+
+compatibility:
+  packs:
+    - openclaw
