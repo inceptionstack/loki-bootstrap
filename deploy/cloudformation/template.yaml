@@ -15,10 +15,13 @@ Metadata:
           - InstanceType
           - DefaultModel
       - Label:
-          default: "🧠 Model Access"
+          default: "🧠 LLM Provider"
         Parameters:
+          - ProviderName
+          - ProviderAuthType
           - ModelMode
           - BedrockRegion
+          - ProviderApiKeySecretArn
           - LiteLLMBaseUrl
           - LiteLLMApiKey
           - LiteLLMModel
@@ -60,10 +63,16 @@ Metadata:
         default: "Instance Size"
       DefaultModel:
         default: "Default AI Model"
+      ProviderName:
+        default: "Provider Name"
+      ProviderAuthType:
+        default: "Provider Auth Type"
       ModelMode:
         default: "Model Access Mode"
       BedrockRegion:
         default: "Bedrock Region"
+      ProviderApiKeySecretArn:
+        default: "Provider API Key Secret ARN"
       LiteLLMBaseUrl:
         default: "LiteLLM Proxy URL"
       LiteLLMApiKey:
@@ -214,7 +223,25 @@ Parameters:
   DefaultModel:
     Type: String
     Default: 'us.anthropic.claude-opus-4-6-v1'
-    Description: "The primary AI model. Claude Opus 4.6 is recommended for best performance. Used when ModelMode is 'bedrock'."
+    Description: "Override the primary AI model. Leave empty to use the selected provider default."
+
+  ProviderName:
+    Type: String
+    Default: bedrock
+    AllowedValues:
+      - bedrock
+      - anthropic-api
+      - openai-api
+      - litellm
+    Description: "LLM provider. Bedrock is recommended because it uses IAM auth and does not require API keys."
+
+  ProviderAuthType:
+    Type: String
+    Default: iam
+    AllowedValues:
+      - iam
+      - bearer
+    Description: "Provider authentication mode. For Bedrock, use 'iam' unless you intentionally want bearer-token auth."
 
   ModelMode:
     Type: String
@@ -246,6 +273,11 @@ Parameters:
     Default: ''
     NoEcho: true
     Description: "Direct API key from your AI provider (e.g. Anthropic). Only needed when Model Access Mode is 'api-key'."
+
+  ProviderApiKeySecretArn:
+    Type: String
+    Default: ''
+    Description: "Secrets Manager ARN containing the provider API key. Preferred over ProviderApiKey for production and StackSets."
 
   EnableBedrockForm:
     Type: String
@@ -325,6 +357,13 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref ExistingVpcId, '']]
         AssertDescription: "ExistingVpcId is required when ExistingSubnetId is provided."
+  ProviderKeyRequiredWhenNonBedrock:
+    RuleCondition: !Not [!Equals [!Ref ProviderName, 'bedrock']]
+    Assertions:
+      - Assert: !Or
+          - !Not [!Equals [!Ref ProviderApiKey, '']]
+          - !Not [!Equals [!Ref ProviderApiKeySecretArn, '']]
+        AssertDescription: "ProviderApiKey or ProviderApiKeySecretArn is required when ProviderName is not bedrock."
 
 # ============================================================================
 # CONDITIONS
@@ -332,9 +371,11 @@ Rules:
 Conditions:
   HasKeyPair: !Not [!Equals [!Ref KeyPairName, '']]
   HasDataVolume: !Not [!Equals [!Ref DataVolumeSize, 0]]
+  HasProviderApiKeySecretArn: !Not [!Equals [!Ref ProviderApiKeySecretArn, '']]
   IsLiteLLM: !Equals [!Ref ModelMode, 'litellm']
   IsApiKey: !Equals [!Ref ModelMode, 'api-key']
   IsBedrock: !Equals [!Ref ModelMode, 'bedrock']
+  IsProviderBedrock: !Equals [!Ref ProviderName, 'bedrock']
   CreateNewVpc: !Equals [!Ref ExistingVpcId, '']
   IsBuilder: !Equals [!Ref ProfileName, 'builder']
   IsNotBuilder: !Not [!Condition IsBuilder]
@@ -1166,6 +1207,8 @@ Resources:
           export REGION="${AWS::Region}"
           export STACK_NAME="${AWS::StackName}"
           export DEFAULT_MODEL="${DefaultModel}"
+          export PROVIDER_NAME="${ProviderName}"
+          export PROVIDER_AUTH_TYPE="${ProviderAuthType}"
           export BEDROCK_REGION="${BedrockRegion}"
           export GW_PORT="${OpenClawGatewayPort}"
           export MODEL_MODE="${ModelMode}"
@@ -1173,6 +1216,7 @@ Resources:
           export LITELLM_API_KEY="${LiteLLMApiKey}"
           export LITELLM_MODEL="${LiteLLMModel}"
           export PROVIDER_API_KEY="${ProviderApiKey}"
+          export PROVIDER_API_KEY_SECRET_ARN="${ProviderApiKeySecretArn}"
           export PACK_NAME="${PackName}"
           export PROFILE_NAME="${ProfileName}"
           # Publish failure to SSM and signal CFN on any error
@@ -1207,13 +1251,16 @@ Resources:
             --pack "$PACK_NAME" \
             --profile "$PROFILE_NAME" \
             --region "$BEDROCK_REGION" \
+            --provider "$PROVIDER_NAME" \
+            --provider-auth-type "$PROVIDER_AUTH_TYPE" \
             --model "$DEFAULT_MODEL" \
             --gw-port "$GW_PORT" \
             --model-mode "$MODEL_MODE" \
             --litellm-base-url "$LITELLM_BASE_URL" \
             --litellm-api-key "$LITELLM_API_KEY" \
             --litellm-model "$LITELLM_MODEL" \
-            --provider-api-key "$PROVIDER_API_KEY"
+            --provider-api-key "$PROVIDER_API_KEY" \
+            --provider-key-secret-id "$PROVIDER_API_KEY_SECRET_ARN"
           # Signal CFN success — defense-in-depth: bootstrap.sh also signals,
           # but this catches edge cases where bootstrap.sh signal fails silently.
           # CFN ignores duplicate signals, so double-fire is safe.
@@ -1274,4 +1321,3 @@ Outputs:
   ProfileName:
     Description: "Deployed permission profile"
     Value: !Ref ProfileName
-

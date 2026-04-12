@@ -22,7 +22,26 @@ source "${SCRIPT_DIR}/../common.sh"
 # Defaults from config file (written by bootstrap dispatcher), then CLI overrides
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
 PACK_ARG_PORT="$(pack_config_get bedrockify_port "8090")"
-PACK_ARG_MODEL="$(pack_config_get model "us.anthropic.claude-opus-4-6-v1")"
+PACK_CONFIG_PATH="${PACK_CONFIG:-/tmp/loki-pack-config.json}"
+provider_default_chat_model() {
+  local config="${PACK_CONFIG_PATH}"
+  if [[ -f "${config}" ]] && command -v jq &>/dev/null; then
+    jq -r '
+      .provider.model_roles.primary
+      // (
+        .provider.models // []
+        | map(select((.inputTypes // []) | index("text")))
+        | .[0].id
+      )
+      // empty
+    ' "${config}" 2>/dev/null
+  fi
+}
+
+PACK_ARG_MODEL="$(provider_default_chat_model)"
+if [[ -z "${PACK_ARG_MODEL}" ]]; then
+  PACK_ARG_MODEL="$(pack_config_get model "us.anthropic.claude-opus-4-6-v1")"
+fi
 PACK_ARG_EMBED_MODEL="$(pack_config_get embed_model "amazon.titan-embed-text-v2:0")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────

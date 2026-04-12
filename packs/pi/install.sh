@@ -24,7 +24,7 @@ source "${SCRIPT_DIR}/../common.sh"
 # The generic --model from the dispatcher carries Bedrock model IDs; we pass them
 # through to bedrockify which handles the translation.
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
-PACK_ARG_MODEL="$(pack_config_get model "us.anthropic.claude-sonnet-4-6-v1")"
+PACK_ARG_MODEL="$(pack_config_get provider.model_roles.primary "$(pack_config_get model "us.anthropic.claude-sonnet-4-6-v1")")"
 PACK_ARG_BEDROCKIFY_PORT="$(pack_config_get bedrockify_port "8090")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
@@ -103,25 +103,41 @@ step "Configuring Pi"
 
 mkdir -p "${HOME}/.pi/agent"
 
-# Write models.json with bedrockify provider config
-cat > "${HOME}/.pi/agent/models.json" <<EOF
-{
-  "providers": {
-    "bedrockify": {
-      "baseUrl": "http://127.0.0.1:${BEDROCKIFY_PORT}/v1",
-      "api": "openai-completions",
-      "apiKey": "not-needed",
-      "compat": {
-        "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false
-      },
-      "models": [
-        { "id": "${MODEL}" }
-      ]
+PACK_CONFIG_PATH="${PACK_CONFIG:-/tmp/loki-pack-config.json}"
+PROVIDER_MODELS_JSON='[]'
+if [[ -f "${PACK_CONFIG_PATH}" ]] && command -v jq &>/dev/null; then
+  PROVIDER_MODELS_JSON="$(jq -c '.provider.models // []' "${PACK_CONFIG_PATH}" 2>/dev/null || echo '[]')"
+fi
+
+jq -n \
+  --arg base_url "http://127.0.0.1:${BEDROCKIFY_PORT}/v1" \
+  --arg primary_model "${MODEL}" \
+  --argjson provider_models "${PROVIDER_MODELS_JSON}" '
+  def normalized_models($primary):
+    (if ($provider_models | type) == "array" then $provider_models else [] end) as $models
+    | if $primary == "" then
+        $models
+      elif any($models[]?; .id == $primary) then
+        $models
+      else
+        [{"id": $primary}] + $models
+      end;
+
+  {
+    providers: {
+      bedrockify: {
+        baseUrl: $base_url,
+        api: "openai-completions",
+        apiKey: "not-needed",
+        compat: {
+          supportsDeveloperRole: false,
+          supportsReasoningEffort: false
+        },
+        models: normalized_models($primary_model)
+      }
     }
   }
-}
-EOF
+' > "${HOME}/.pi/agent/models.json"
 
 chmod 600 "${HOME}/.pi/agent/models.json"
 ok "Pi config written: ${HOME}/.pi/agent/models.json"

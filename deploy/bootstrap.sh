@@ -93,7 +93,9 @@ Required:
 Common options:
   --region <r>      AWS region for provider use   (default: us-east-1)
   --provider <name> LLM provider                  (default: bedrock)
+  --provider-auth-type <type> Provider auth type  (default: provider default)
   --model <id>      Override primary model ID
+  --provider-key-secret-id <id> Read provider API key from Secrets Manager
   --help            Show this help message
 
 All --key value arguments are forwarded to pack install.sh scripts.
@@ -120,12 +122,14 @@ MODEL=""
 GW_PORT=""
 MODEL_MODE=""
 PROVIDER="bedrock"
+PROVIDER_AUTH_TYPE=""
 BEDROCKIFY_PORT=""
 HERMES_MODEL=""
 LITELLM_URL=""
 LITELLM_KEY=""
 LITELLM_MODEL=""
 PROVIDER_KEY=""
+PROVIDER_KEY_SECRET_ID=""
 PROVIDER_SET=0
 MODEL_MODE_SET=0
 
@@ -159,6 +163,11 @@ while [[ $# -gt 0 ]]; do
       [[ $# -gt 1 ]] || { echo "ERROR: --provider requires a value" >&2; exit 1; }
       PROVIDER="$2"
       PROVIDER_SET=1
+      shift 2
+      ;;
+    --provider-auth-type)
+      [[ $# -gt 1 ]] || { echo "ERROR: --provider-auth-type requires a value" >&2; exit 1; }
+      PROVIDER_AUTH_TYPE="$2"
       shift 2
       ;;
     --gw-port)
@@ -200,6 +209,11 @@ while [[ $# -gt 0 ]]; do
     --provider-api-key|--provider-key)
       [[ $# -gt 1 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
       PROVIDER_KEY="$2"
+      shift 2
+      ;;
+    --provider-key-secret-id)
+      [[ $# -gt 1 ]] || { echo "ERROR: --provider-key-secret-id requires a value" >&2; exit 1; }
+      PROVIDER_KEY_SECRET_ID="$2"
       shift 2
       ;;
     --*)
@@ -245,6 +259,70 @@ if [[ -z "${LEGACY_MODEL_MODE}" ]]; then
     litellm) LEGACY_MODEL_MODE="litellm" ;;
     *) LEGACY_MODEL_MODE="api-key" ;;
   esac
+fi
+
+fetch_provider_key_from_secret() {
+  local secret_id="$1"
+  local secret_string
+
+  secret_string="$(aws secretsmanager get-secret-value \
+    --secret-id "${secret_id}" \
+    --region "${REGION}" \
+    --query SecretString \
+    --output text 2>/dev/null || true)"
+
+  if [[ -z "${secret_string}" || "${secret_string}" == "None" ]]; then
+    fail "Failed to read provider API key from Secrets Manager"
+    exit 1
+  fi
+
+  PROVIDER_KEY="$(
+    PROVIDER_SECRET_STRING="${secret_string}" python3 - <<'PY'
+import json
+import os
+
+secret = os.environ.get("PROVIDER_SECRET_STRING", "").strip()
+if not secret:
+    raise SystemExit(1)
+
+try:
+    payload = json.loads(secret)
+except json.JSONDecodeError:
+    print(secret)
+    raise SystemExit(0)
+
+if isinstance(payload, str):
+    print(payload)
+    raise SystemExit(0)
+
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+
+for key in (
+    "apiKey",
+    "api_key",
+    "key",
+    "token",
+    "provider_api_key",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+):
+    value = payload.get(key)
+    if isinstance(value, str) and value:
+        print(value)
+        raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+  )" || {
+    fail "Secrets Manager secret format is invalid for provider API key lookup"
+    exit 1
+  }
+}
+
+if [[ -z "${PROVIDER_KEY}" && -n "${PROVIDER_KEY_SECRET_ID}" ]]; then
+  info "Fetching provider API key from Secrets Manager"
+  fetch_provider_key_from_secret "${PROVIDER_KEY_SECRET_ID}"
 fi
 
 # ── Write pack config JSON ────────────────────────────────────────────────────
@@ -321,6 +399,9 @@ if [[ -n "${MODEL}" ]]; then
 fi
 if [[ -n "${PROVIDER_KEY}" ]]; then
   PROVIDER_RESOLVE_ARGS+=(--provider-key "${PROVIDER_KEY}")
+fi
+if [[ -n "${PROVIDER_AUTH_TYPE}" ]]; then
+  PROVIDER_RESOLVE_ARGS+=(--provider-auth-type "${PROVIDER_AUTH_TYPE}")
 fi
 
 python3 "${PROVIDER_RESOLVER}" "${PROVIDER_RESOLVE_ARGS[@]}"
@@ -745,9 +826,9 @@ LOKIPROFILE
 chmod 644 /etc/profile.d/loki.sh
 ok "Shell profile installed (/etc/profile.d/loki.sh)"
 
-# ---- Bedrock model access check (runs for ALL profiles — all need inference) ----
-step "Bedrock Model Access Check"
-sudo -u ec2-user bash << 'BEDROCK_EOF'
+if [[ "${PROVIDER}" == "bedrock" ]]; then
+  step "Bedrock Model Access Check"
+  sudo -u ec2-user bash << 'BEDROCK_EOF'
 set -euo pipefail
 ok()   { echo "[OK]    $(date -u '+%H:%M:%S') $1"; }
 fail() { echo "[FAIL]  $(date -u '+%H:%M:%S') $1"; }
@@ -758,6 +839,10 @@ else
   fail "Bedrock access form not submitted — complete it at: https://us-east-1.console.aws.amazon.com/bedrock/home#/modelaccess"
 fi
 BEDROCK_EOF
+else
+  step "Provider Access Check"
+  ok "Skipping Bedrock access form check for provider '${PROVIDER}'"
+fi
 
 # ---- Security services check (skip for personal_assistant — no AWS read access) ----
 if [[ "${PROFILE_NAME:-}" == "personal_assistant" ]]; then

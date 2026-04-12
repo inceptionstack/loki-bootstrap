@@ -22,7 +22,37 @@ source "${SCRIPT_DIR}/../common.sh"
 # Defaults from config file (written by bootstrap dispatcher), then CLI overrides
 # Note: reads "hermes_model" key (not "model") — hermes needs OpenAI-style model ID
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
-PACK_ARG_MODEL="$(pack_config_get hermes_model "anthropic/claude-opus-4.6")"
+PROVIDER_PRIMARY_MODEL="$(pack_config_get provider.model_roles.primary "")"
+legacy_hermes_model() {
+  pack_config_get hermes_model "anthropic/claude-opus-4.6"
+}
+
+bedrock_to_hermes_model() {
+  local model_id="$1"
+  python3 - "$model_id" <<'PY'
+import re
+import sys
+
+model = sys.argv[1]
+if not model:
+    print("")
+elif "/" in model:
+    print(model)
+elif model.startswith(("global.anthropic.", "us.anthropic.")):
+    alias = model.split(".anthropic.", 1)[1]
+    alias = re.sub(r"-v\d+(?::\d+)?$", "", alias)
+    alias = re.sub(r"-(\d+)-(\d+)$", r"-\1.\2", alias)
+    print(f"anthropic/{alias}")
+else:
+    print(model)
+PY
+}
+
+if [[ -n "${PROVIDER_PRIMARY_MODEL}" ]]; then
+  PACK_ARG_MODEL="$(bedrock_to_hermes_model "${PROVIDER_PRIMARY_MODEL}")"
+else
+  PACK_ARG_MODEL="$(legacy_hermes_model)"
+fi
 PACK_ARG_BEDROCKIFY_PORT="$(pack_config_get bedrockify_port "8090")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────

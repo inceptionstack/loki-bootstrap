@@ -49,9 +49,11 @@ def render_base_url(template: str | None, values: dict[str, str]) -> str:
     return Template(template).safe_substitute(values)
 
 
-def detect_auth_mode(manifest: dict[str, Any], provider_key: str) -> str:
+def detect_auth_mode(manifest: dict[str, Any], provider_key: str, provider_auth_type: str = "") -> str:
     auth = manifest.get("auth", {})
     modes = auth.get("modes") or []
+    if provider_auth_type:
+        return provider_auth_type
     if provider_key and "bearer" in modes:
         return "bearer"
     if auth.get("defaultMode"):
@@ -82,6 +84,7 @@ def main() -> int:
     parser.add_argument("--region", default="", help="Region override")
     parser.add_argument("--model", default="", help="Primary model override")
     parser.add_argument("--provider-key", default="", help="Provider key override for auth-mode resolution")
+    parser.add_argument("--provider-auth-type", default="", help="Provider auth type override")
     parser.add_argument("--config", default=str(CONFIG_PATH), help="Config output path")
     args = parser.parse_args()
 
@@ -106,7 +109,7 @@ def main() -> int:
     auth = manifest.get("auth") or {}
 
     region = args.region or str(existing.get("region") or "")
-    auth_mode = detect_auth_mode(manifest, args.provider_key)
+    auth_mode = detect_auth_mode(manifest, args.provider_key, args.provider_auth_type)
 
     primary_model = args.model or str(defaults.get("primaryModel") or "")
     fallback_model = str(defaults.get("fallbackModel") or "")
