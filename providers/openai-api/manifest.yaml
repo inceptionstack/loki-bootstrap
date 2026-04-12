@@ -25,6 +25,11 @@ defaults:
   fallbackModel: gpt-4.1-mini
   heartbeatModel: gpt-4.1-mini
 
+compatibility:
+  packs:
+    - openclaw
+    - hermes
+
 models:
   - id: gpt-4.1
     name: GPT-4.1

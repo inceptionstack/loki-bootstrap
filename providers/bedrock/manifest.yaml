@@ -27,6 +27,16 @@ defaults:
   fallbackModel: global.anthropic.claude-sonnet-4-6
   heartbeatModel: global.anthropic.claude-sonnet-4-6
 
+compatibility:
+  packs:
+    - openclaw
+    - claude-code
+    - hermes
+    - pi
+    - ironclaw
+    - nemoclaw
+    - kiro-cli
+
 models:
   - id: global.anthropic.claude-opus-4-6-v1
     name: Claude Opus 4.6

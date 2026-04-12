@@ -21,6 +21,7 @@ packs:
     deps: []
     supported_providers:
       - bedrock
+      - anthropic-api
     instance_type: t4g.large
     root_volume_gb: 40
     data_volume_gb: 0
@@ -58,6 +59,9 @@ packs:
       - bedrockify
     supported_providers:
       - bedrock
+      - anthropic-api
+      - openai-api
+      - openrouter
     instance_type: t4g.medium
     root_volume_gb: 40
     data_volume_gb: 0
@@ -74,6 +78,8 @@ packs:
       - bedrockify
     supported_providers:
       - bedrock
+      - openrouter
+      - litellm
     instance_type: t4g.medium
     root_volume_gb: 40
     data_volume_gb: 0

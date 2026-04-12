@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from string import Template
@@ -85,6 +86,7 @@ def main() -> int:
     parser.add_argument("--model", default="", help="Primary model override")
     parser.add_argument("--provider-key", default="", help="Provider key override for auth-mode resolution")
     parser.add_argument("--provider-auth-type", default="", help="Provider auth type override")
+    parser.add_argument("--provider-base-url", default="", help="Provider base URL override")
     parser.add_argument("--config", default=str(CONFIG_PATH), help="Config output path")
     args = parser.parse_args()
 
@@ -119,7 +121,7 @@ def main() -> int:
         "region": region,
         "provider": args.provider,
     }
-    base_url = render_base_url(connection.get("baseUrlTemplate"), base_url_values)
+    base_url = args.provider_base_url or render_base_url(connection.get("baseUrlTemplate"), base_url_values)
 
     # H2: Validate required API key for non-IAM providers
     auth_method = auth.get("method", "")

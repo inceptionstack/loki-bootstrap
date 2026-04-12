@@ -130,6 +130,7 @@ LITELLM_KEY=""
 LITELLM_MODEL=""
 PROVIDER_KEY=""
 PROVIDER_KEY_SECRET_ID=""
+PROVIDER_BASE_URL=""
 PROVIDER_SET=0
 MODEL_MODE_SET=0
 
@@ -194,6 +195,11 @@ while [[ $# -gt 0 ]]; do
     --litellm-base-url|--litellm-url)
       [[ $# -gt 1 ]] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
       LITELLM_URL="$2"
+      shift 2
+      ;;
+    --provider-base-url)
+      [[ $# -gt 1 ]] || { echo "ERROR: --provider-base-url requires a value" >&2; exit 1; }
+      PROVIDER_BASE_URL="$2"
       shift 2
       ;;
     --litellm-api-key|--litellm-key)
@@ -325,6 +331,10 @@ if [[ -z "${PROVIDER_KEY}" && -n "${PROVIDER_KEY_SECRET_ID}" ]]; then
   fetch_provider_key_from_secret "${PROVIDER_KEY_SECRET_ID}"
 fi
 
+if [[ -z "${LITELLM_URL}" && -n "${PROVIDER_BASE_URL}" && "${PROVIDER}" == "litellm" ]]; then
+  LITELLM_URL="${PROVIDER_BASE_URL}"
+fi
+
 # ── Write pack config JSON ────────────────────────────────────────────────────
 PACK_CONFIG="/tmp/loki-pack-config.json"
 PACK_CONFIG_TMP="${PACK_CONFIG}.tmp"
@@ -340,10 +350,12 @@ jq -n \
   --arg litellm_url "$LITELLM_URL" \
   --arg litellm_model "$LITELLM_MODEL" \
   --arg provider_name "$PROVIDER" \
+  --arg provider_base_url "$PROVIDER_BASE_URL" \
   '{pack:$pack, profile:$profile, region:$region, model:$model, gw_port:$gw_port,
     model_mode:$model_mode, bedrockify_port:$bedrockify_port,
     hermes_model:$hermes_model, litellm_url:$litellm_url,
-    litellm_model:$litellm_model, provider_name:$provider_name}' > "${PACK_CONFIG_TMP}"
+    litellm_model:$litellm_model, provider_name:$provider_name,
+    provider_base_url:$provider_base_url}' > "${PACK_CONFIG_TMP}"
 mv "${PACK_CONFIG_TMP}" "${PACK_CONFIG}"
 chmod 600 "${PACK_CONFIG}"
 chown ec2-user:ec2-user "${PACK_CONFIG}" 2>/dev/null || true
@@ -408,6 +420,9 @@ if [[ -n "${PROVIDER_KEY}" ]]; then
 fi
 if [[ -n "${PROVIDER_AUTH_TYPE}" ]]; then
   PROVIDER_RESOLVE_ARGS+=(--provider-auth-type "${PROVIDER_AUTH_TYPE}")
+fi
+if [[ -n "${PROVIDER_BASE_URL}" ]]; then
+  PROVIDER_RESOLVE_ARGS+=(--provider-base-url "${PROVIDER_BASE_URL}")
 fi
 
 python3 "${PROVIDER_RESOLVER}" "${PROVIDER_RESOLVE_ARGS[@]}"

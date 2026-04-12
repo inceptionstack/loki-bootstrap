@@ -25,6 +25,12 @@ defaults:
   fallbackModel: claude-sonnet-4-6-20250514
   heartbeatModel: claude-sonnet-4-6-20250514
 
+compatibility:
+  packs:
+    - openclaw
+    - claude-code
+    - hermes
+
 models:
   - id: claude-opus-4-6-20250514
     name: Claude Opus 4.6

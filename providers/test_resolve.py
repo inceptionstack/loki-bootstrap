@@ -63,9 +63,9 @@ class ResolveTests(unittest.TestCase):
 
             result = self.run_resolve(
                 "--provider",
-                "openai-api",
+                "anthropic-api",
                 "--pack",
-                "hermes",
+                "nemoclaw",
                 "--config",
                 str(config_path),
             )

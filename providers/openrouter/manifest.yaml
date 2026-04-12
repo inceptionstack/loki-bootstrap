@@ -27,6 +27,12 @@ defaults:
   fallbackModel: anthropic/claude-sonnet-4
   heartbeatModel: anthropic/claude-sonnet-4
 
+compatibility:
+  packs:
+    - openclaw
+    - hermes
+    - pi
+
 models:
   - id: anthropic/claude-opus-4.1
     name: Claude Opus 4.1 via OpenRouter

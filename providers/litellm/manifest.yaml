@@ -26,6 +26,11 @@ defaults:
   fallbackModel: claude-sonnet-4-6
   heartbeatModel: claude-sonnet-4-6
 
+compatibility:
+  packs:
+    - openclaw
+    - pi
+
 models:
   - id: claude-opus-4-6
     name: Claude Opus 4.6
