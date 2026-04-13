@@ -14,29 +14,46 @@ wizard_bool_to_cfn() {
 }
 
 build_bootstrap_command() {
-  local -n state_ref="$1"
+  local pack profile provider provider_auth_type provider_region primary_model_override
+  local provider_key provider_key_secret_id provider_base_url repo_branch gw_port
+  local bedrockify_port hermes_model existing_vpc_id existing_subnet_id
+  pack="$(wizard_state_get pack)"
+  profile="$(wizard_state_get profile)"
+  provider="$(wizard_state_get provider)"
+  provider_auth_type="$(wizard_state_get providerAuthType)"
+  provider_region="$(wizard_state_get providerRegion)"
+  primary_model_override="$(wizard_state_get primaryModelOverride)"
+  provider_key="$(wizard_state_get providerKey)"
+  provider_key_secret_id="$(wizard_state_get providerKeySecretId)"
+  provider_base_url="$(wizard_state_get providerBaseUrl)"
+  repo_branch="$(wizard_state_get repoBranch)"
+  gw_port="$(wizard_state_get gwPort)"
+  bedrockify_port="$(wizard_state_get bedrockifyPort)"
+  hermes_model="$(wizard_state_get hermesModel)"
+  existing_vpc_id="$(wizard_state_get existingVpcId)"
+  existing_subnet_id="$(wizard_state_get existingSubnetId)"
   local cmd=()
   cmd+=(bash deploy/bootstrap.sh)
-  cmd+=(--pack "$(wizard_shell_quote "${state_ref[pack]}")")
-  [[ -n "${state_ref[profile]}" ]] && cmd+=(--profile "$(wizard_shell_quote "${state_ref[profile]}")")
-  [[ -n "${state_ref[provider]}" && "${state_ref[provider]}" != "own-cloud" ]] && \
-    cmd+=(--provider "$(wizard_shell_quote "${state_ref[provider]}")")
-  [[ "${state_ref[provider]}" == "bedrock" && -n "${state_ref[providerAuthType]}" ]] && \
-    cmd+=(--provider-auth-type "$(wizard_shell_quote "${state_ref[providerAuthType]}")")
-  [[ -n "${state_ref[providerRegion]}" ]] && cmd+=(--region "$(wizard_shell_quote "${state_ref[providerRegion]}")")
-  [[ -n "${state_ref[primaryModelOverride]}" ]] && cmd+=(--model "$(wizard_shell_quote "${state_ref[primaryModelOverride]}")")
-  [[ -n "${state_ref[providerKey]}" ]] && cmd+=(--provider-key "$(wizard_shell_quote "${state_ref[providerKey]}")")
-  [[ -n "${state_ref[providerKeySecretId]}" ]] && cmd+=(--provider-key-secret-id "$(wizard_shell_quote "${state_ref[providerKeySecretId]}")")
-  [[ -n "${state_ref[providerBaseUrl]}" ]] && cmd+=(--provider-base-url "$(wizard_shell_quote "${state_ref[providerBaseUrl]}")")
-  if [[ "${state_ref[provider]}" == "litellm" && -n "${state_ref[providerBaseUrl]}" ]]; then
-    cmd+=(--litellm-base-url "$(wizard_shell_quote "${state_ref[providerBaseUrl]}")")
+  cmd+=(--pack "$(wizard_shell_quote "${pack}")")
+  [[ -n "${profile}" ]] && cmd+=(--profile "$(wizard_shell_quote "${profile}")")
+  [[ -n "${provider}" && "${provider}" != "own-cloud" ]] && \
+    cmd+=(--provider "$(wizard_shell_quote "${provider}")")
+  [[ "${provider}" == "bedrock" && -n "${provider_auth_type}" ]] && \
+    cmd+=(--provider-auth-type "$(wizard_shell_quote "${provider_auth_type}")")
+  [[ -n "${provider_region}" ]] && cmd+=(--region "$(wizard_shell_quote "${provider_region}")")
+  [[ -n "${primary_model_override}" ]] && cmd+=(--model "$(wizard_shell_quote "${primary_model_override}")")
+  [[ -n "${provider_key}" ]] && cmd+=(--provider-key "$(wizard_shell_quote "${provider_key}")")
+  [[ -n "${provider_key_secret_id}" ]] && cmd+=(--provider-key-secret-id "$(wizard_shell_quote "${provider_key_secret_id}")")
+  [[ -n "${provider_base_url}" ]] && cmd+=(--provider-base-url "$(wizard_shell_quote "${provider_base_url}")")
+  if [[ "${provider}" == "litellm" && -n "${provider_base_url}" ]]; then
+    cmd+=(--litellm-base-url "$(wizard_shell_quote "${provider_base_url}")")
   fi
-  [[ -n "${state_ref[repoBranch]}" ]] && cmd+=(--repo-branch "$(wizard_shell_quote "${state_ref[repoBranch]}")")
-  [[ -n "${state_ref[gwPort]}" ]] && cmd+=(--gw-port "$(wizard_shell_quote "${state_ref[gwPort]}")")
-  [[ -n "${state_ref[bedrockifyPort]}" ]] && cmd+=(--bedrockify-port "$(wizard_shell_quote "${state_ref[bedrockifyPort]}")")
-  [[ -n "${state_ref[hermesModel]}" ]] && cmd+=(--hermes-model "$(wizard_shell_quote "${state_ref[hermesModel]}")")
-  [[ -n "${state_ref[existingVpcId]}" ]] && cmd+=(--existing-vpc-id "$(wizard_shell_quote "${state_ref[existingVpcId]}")")
-  [[ -n "${state_ref[existingSubnetId]}" ]] && cmd+=(--existing-subnet-id "$(wizard_shell_quote "${state_ref[existingSubnetId]}")")
+  [[ -n "${repo_branch}" ]] && cmd+=(--repo-branch "$(wizard_shell_quote "${repo_branch}")")
+  [[ -n "${gw_port}" ]] && cmd+=(--gw-port "$(wizard_shell_quote "${gw_port}")")
+  [[ -n "${bedrockify_port}" ]] && cmd+=(--bedrockify-port "$(wizard_shell_quote "${bedrockify_port}")")
+  [[ -n "${hermes_model}" ]] && cmd+=(--hermes-model "$(wizard_shell_quote "${hermes_model}")")
+  [[ -n "${existing_vpc_id}" ]] && cmd+=(--existing-vpc-id "$(wizard_shell_quote "${existing_vpc_id}")")
+  [[ -n "${existing_subnet_id}" ]] && cmd+=(--existing-subnet-id "$(wizard_shell_quote "${existing_subnet_id}")")
   local out=""
   local part
   for part in "${cmd[@]}"; do
@@ -47,35 +64,34 @@ build_bootstrap_command() {
 }
 
 build_cfn_params() {
-  local -n state_ref="$1"
   jq -n \
-    --arg EnvironmentName "${state_ref[environmentName]}" \
-    --arg PackName "${state_ref[pack]}" \
-    --arg ProfileName "${state_ref[profile]}" \
-    --arg InstanceType "${state_ref[instanceType]}" \
-    --arg RootVolumeSize "${state_ref[rootVolumeGb]}" \
-    --arg DataVolumeSize "${state_ref[dataVolumeGb]}" \
-    --arg KeyPairName "${state_ref[keyPairName]}" \
-    --arg BedrockRegion "${state_ref[providerRegion]}" \
-    --arg DefaultModel "${state_ref[primaryModelOverride]}" \
-    --arg ProviderName "${state_ref[provider]}" \
-    --arg ProviderAuthType "${state_ref[providerAuthType]}" \
-    --arg ProviderApiKey "${state_ref[providerKey]}" \
-    --arg ProviderApiKeySecretArn "${state_ref[providerKeySecretId]}" \
-    --arg LiteLLMBaseUrl "${state_ref[providerBaseUrl]}" \
-    --arg ExistingVpcId "${state_ref[existingVpcId]}" \
-    --arg ExistingSubnetId "${state_ref[existingSubnetId]}" \
-    --arg SSHAllowedCidr "${state_ref[sshAllowedCidr]}" \
-    --arg RepoBranch "${state_ref[repoBranch]}" \
-    --arg OpenClawGatewayPort "${state_ref[gwPort]}" \
-    --arg LokiWatermark "${state_ref[lokiWatermark]}" \
-    --arg EnableBedrockForm "$(wizard_bool_to_cfn "${state_ref[enableBedrockForm]}")" \
-    --arg RequestQuotaIncreases "$(wizard_bool_to_cfn "${state_ref[requestQuotaIncreases]}")" \
-    --arg EnableSecurityHub "$(wizard_bool_to_cfn "${state_ref[enableSecurityHub]}")" \
-    --arg EnableGuardDuty "$(wizard_bool_to_cfn "${state_ref[enableGuardDuty]}")" \
-    --arg EnableInspector "$(wizard_bool_to_cfn "${state_ref[enableInspector]}")" \
-    --arg EnableAccessAnalyzer "$(wizard_bool_to_cfn "${state_ref[enableAccessAnalyzer]}")" \
-    --arg EnableConfigRecorder "$(wizard_bool_to_cfn "${state_ref[enableConfigRecorder]}")" \
+    --arg EnvironmentName "$(wizard_state_get environmentName)" \
+    --arg PackName "$(wizard_state_get pack)" \
+    --arg ProfileName "$(wizard_state_get profile)" \
+    --arg InstanceType "$(wizard_state_get instanceType)" \
+    --arg RootVolumeSize "$(wizard_state_get rootVolumeGb)" \
+    --arg DataVolumeSize "$(wizard_state_get dataVolumeGb)" \
+    --arg KeyPairName "$(wizard_state_get keyPairName)" \
+    --arg BedrockRegion "$(wizard_state_get providerRegion)" \
+    --arg DefaultModel "$(wizard_state_get primaryModelOverride)" \
+    --arg ProviderName "$(wizard_state_get provider)" \
+    --arg ProviderAuthType "$(wizard_state_get providerAuthType)" \
+    --arg ProviderApiKey "$(wizard_state_get providerKey)" \
+    --arg ProviderApiKeySecretArn "$(wizard_state_get providerKeySecretId)" \
+    --arg LiteLLMBaseUrl "$(wizard_state_get providerBaseUrl)" \
+    --arg ExistingVpcId "$(wizard_state_get existingVpcId)" \
+    --arg ExistingSubnetId "$(wizard_state_get existingSubnetId)" \
+    --arg SSHAllowedCidr "$(wizard_state_get sshAllowedCidr)" \
+    --arg RepoBranch "$(wizard_state_get repoBranch)" \
+    --arg OpenClawGatewayPort "$(wizard_state_get gwPort)" \
+    --arg LokiWatermark "$(wizard_state_get lokiWatermark)" \
+    --arg EnableBedrockForm "$(wizard_bool_to_cfn "$(wizard_state_get enableBedrockForm)")" \
+    --arg RequestQuotaIncreases "$(wizard_bool_to_cfn "$(wizard_state_get requestQuotaIncreases)")" \
+    --arg EnableSecurityHub "$(wizard_bool_to_cfn "$(wizard_state_get enableSecurityHub)")" \
+    --arg EnableGuardDuty "$(wizard_bool_to_cfn "$(wizard_state_get enableGuardDuty)")" \
+    --arg EnableInspector "$(wizard_bool_to_cfn "$(wizard_state_get enableInspector)")" \
+    --arg EnableAccessAnalyzer "$(wizard_bool_to_cfn "$(wizard_state_get enableAccessAnalyzer)")" \
+    --arg EnableConfigRecorder "$(wizard_bool_to_cfn "$(wizard_state_get enableConfigRecorder)")" \
     '{
       EnvironmentName: $EnvironmentName,
       PackName: $PackName,
@@ -108,36 +124,35 @@ build_cfn_params() {
 }
 
 build_terraform_vars() {
-  local -n state_ref="$1"
   jq -n \
-    --arg environment_name "${state_ref[environmentName]}" \
-    --arg pack_name "${state_ref[pack]}" \
-    --arg profile_name "${state_ref[profile]}" \
-    --arg instance_type "${state_ref[instanceType]}" \
-    --arg root_volume_size "${state_ref[rootVolumeGb]}" \
-    --arg data_volume_size "${state_ref[dataVolumeGb]}" \
-    --arg key_pair_name "${state_ref[keyPairName]}" \
-    --arg bedrock_region "${state_ref[providerRegion]}" \
-    --arg default_model "${state_ref[primaryModelOverride]}" \
-    --arg provider_name "${state_ref[provider]}" \
-    --arg provider_auth_type "${state_ref[providerAuthType]}" \
-    --arg provider_api_key "${state_ref[providerKey]}" \
-    --arg provider_api_key_secret_arn "${state_ref[providerKeySecretId]}" \
-    --arg provider_base_url "${state_ref[providerBaseUrl]}" \
-    --arg litellm_base_url "${state_ref[providerBaseUrl]}" \
-    --arg existing_vpc_id "${state_ref[existingVpcId]}" \
-    --arg existing_subnet_id "${state_ref[existingSubnetId]}" \
-    --arg ssh_allowed_cidr "${state_ref[sshAllowedCidr]}" \
-    --arg repo_branch "${state_ref[repoBranch]}" \
-    --arg openclaw_gateway_port "${state_ref[gwPort]}" \
-    --arg loki_watermark "${state_ref[lokiWatermark]}" \
-    --arg enable_bedrock_form "$(wizard_bool_to_cfn "${state_ref[enableBedrockForm]}")" \
-    --arg request_quota_increases "$(wizard_bool_to_cfn "${state_ref[requestQuotaIncreases]}")" \
-    --argjson enable_security_hub "$( [[ "${state_ref[enableSecurityHub]}" == "true" ]] && echo true || echo false )" \
-    --argjson enable_guardduty "$( [[ "${state_ref[enableGuardDuty]}" == "true" ]] && echo true || echo false )" \
-    --argjson enable_inspector "$( [[ "${state_ref[enableInspector]}" == "true" ]] && echo true || echo false )" \
-    --argjson enable_access_analyzer "$( [[ "${state_ref[enableAccessAnalyzer]}" == "true" ]] && echo true || echo false )" \
-    --argjson enable_config_recorder "$( [[ "${state_ref[enableConfigRecorder]}" == "true" ]] && echo true || echo false )" \
+    --arg environment_name "$(wizard_state_get environmentName)" \
+    --arg pack_name "$(wizard_state_get pack)" \
+    --arg profile_name "$(wizard_state_get profile)" \
+    --arg instance_type "$(wizard_state_get instanceType)" \
+    --arg root_volume_size "$(wizard_state_get rootVolumeGb)" \
+    --arg data_volume_size "$(wizard_state_get dataVolumeGb)" \
+    --arg key_pair_name "$(wizard_state_get keyPairName)" \
+    --arg bedrock_region "$(wizard_state_get providerRegion)" \
+    --arg default_model "$(wizard_state_get primaryModelOverride)" \
+    --arg provider_name "$(wizard_state_get provider)" \
+    --arg provider_auth_type "$(wizard_state_get providerAuthType)" \
+    --arg provider_api_key "$(wizard_state_get providerKey)" \
+    --arg provider_api_key_secret_arn "$(wizard_state_get providerKeySecretId)" \
+    --arg provider_base_url "$(wizard_state_get providerBaseUrl)" \
+    --arg litellm_base_url "$(wizard_state_get providerBaseUrl)" \
+    --arg existing_vpc_id "$(wizard_state_get existingVpcId)" \
+    --arg existing_subnet_id "$(wizard_state_get existingSubnetId)" \
+    --arg ssh_allowed_cidr "$(wizard_state_get sshAllowedCidr)" \
+    --arg repo_branch "$(wizard_state_get repoBranch)" \
+    --arg openclaw_gateway_port "$(wizard_state_get gwPort)" \
+    --arg loki_watermark "$(wizard_state_get lokiWatermark)" \
+    --arg enable_bedrock_form "$(wizard_bool_to_cfn "$(wizard_state_get enableBedrockForm)")" \
+    --arg request_quota_increases "$(wizard_bool_to_cfn "$(wizard_state_get requestQuotaIncreases)")" \
+    --argjson enable_security_hub "$( [[ "$(wizard_state_get enableSecurityHub)" == "true" ]] && echo true || echo false )" \
+    --argjson enable_guardduty "$( [[ "$(wizard_state_get enableGuardDuty)" == "true" ]] && echo true || echo false )" \
+    --argjson enable_inspector "$( [[ "$(wizard_state_get enableInspector)" == "true" ]] && echo true || echo false )" \
+    --argjson enable_access_analyzer "$( [[ "$(wizard_state_get enableAccessAnalyzer)" == "true" ]] && echo true || echo false )" \
+    --argjson enable_config_recorder "$( [[ "$(wizard_state_get enableConfigRecorder)" == "true" ]] && echo true || echo false )" \
     '{
       environment_name: $environment_name,
       pack_name: $pack_name,

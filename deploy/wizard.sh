@@ -366,9 +366,9 @@ EOF
 }
 
 set_pack_defaults() {
-  local pack="${WIZARD_STATE[pack]}"
+  local pack="$(wizard_state_get pack)"
   local previous_pack instance root data gw
-  previous_pack="${WIZARD_STATE[lastPackSelection]}"
+  previous_pack="$(wizard_state_get lastPackSelection)"
   instance="$(wizard_pack_default_field "${pack}" instance_type)"
   root="$(wizard_pack_default_field "${pack}" root_volume_gb)"
   data="$(wizard_pack_default_field "${pack}" data_volume_gb)"
@@ -377,51 +377,54 @@ set_pack_defaults() {
   [[ -z "${root}" ]] && root="$(wizard_global_default_field root_volume_gb)"
   [[ -z "${data}" ]] && data="$(wizard_global_default_field data_volume_gb)"
   [[ -z "${gw}" ]] && gw="3001"
-  [[ -z "${WIZARD_STATE[environmentName]}" || "${WIZARD_STATE[environmentName]}" == "${previous_pack}" ]] && \
-    WIZARD_STATE[environmentName]="${pack}"
-  WIZARD_STATE[lastPackSelection]="${pack}"
-  WIZARD_STATE[lokiWatermark]="${WIZARD_STATE[environmentName]}"
-  WIZARD_STATE[instanceType]="${instance}"
-  WIZARD_STATE[rootVolumeGb]="${root}"
-  WIZARD_STATE[dataVolumeGb]="${data}"
-  WIZARD_STATE[gwPort]="${gw}"
+  [[ -z "$(wizard_state_get environmentName)" || "$(wizard_state_get environmentName)" == "${previous_pack}" ]] && \
+    wizard_state_set environmentName "${pack}"
+  wizard_state_set_many \
+    lastPackSelection "${pack}" \
+    lokiWatermark "$(wizard_state_get environmentName)" \
+    instanceType "${instance}" \
+    rootVolumeGb "${root}" \
+    dataVolumeGb "${data}" \
+    gwPort "${gw}"
 }
 
 set_provider_defaults() {
-  local provider="${WIZARD_STATE[provider]}"
+  local provider="$(wizard_state_get provider)"
   [[ -z "${provider}" || "${provider}" == "own-cloud" ]] && return 0
-  WIZARD_STATE[providerAuthType]="$(wizard_provider_default_mode "${provider}")"
+  wizard_state_set providerAuthType "$(wizard_provider_default_mode "${provider}")"
   if [[ "$(wizard_provider_region_required "${provider}")" == "true" ]]; then
-    WIZARD_STATE[providerRegion]="$(wizard_global_default_field bedrock_region)"
+    wizard_state_set providerRegion "$(wizard_global_default_field bedrock_region)"
   else
-    WIZARD_STATE[providerRegion]=""
+    wizard_state_set providerRegion ""
   fi
-  WIZARD_STATE[providerBaseUrl]=""
+  wizard_state_set providerBaseUrl ""
   case "${provider}" in
     litellm)
-      WIZARD_STATE[providerBaseUrl]=""
+      wizard_state_set providerBaseUrl ""
       ;;
     openrouter|openai-api)
-      WIZARD_STATE[providerBaseUrl]="$(jq -r --arg p "${provider}" '.[$p].connection.baseUrlTemplate // ""' <<<"${WIZARD_PROVIDERS_JSON}")"
+      wizard_state_set providerBaseUrl "$(jq -r --arg p "${provider}" '.[$p].connection.baseUrlTemplate // ""' <<<"${WIZARD_PROVIDERS_JSON}")"
       ;;
   esac
 }
 
 apply_profile_defaults() {
-  case "${WIZARD_STATE[profile]}" in
+  case "$(wizard_state_get profile)" in
     personal_assistant)
-      WIZARD_STATE[enableSecurityHub]="false"
-      WIZARD_STATE[enableGuardDuty]="false"
-      WIZARD_STATE[enableInspector]="false"
-      WIZARD_STATE[enableAccessAnalyzer]="false"
-      WIZARD_STATE[enableConfigRecorder]="false"
+      wizard_state_set_many \
+        enableSecurityHub "false" \
+        enableGuardDuty "false" \
+        enableInspector "false" \
+        enableAccessAnalyzer "false" \
+        enableConfigRecorder "false"
       ;;
     *)
-      WIZARD_STATE[enableSecurityHub]="true"
-      WIZARD_STATE[enableGuardDuty]="true"
-      WIZARD_STATE[enableInspector]="true"
-      WIZARD_STATE[enableAccessAnalyzer]="true"
-      WIZARD_STATE[enableConfigRecorder]="true"
+      wizard_state_set_many \
+        enableSecurityHub "true" \
+        enableGuardDuty "true" \
+        enableInspector "true" \
+        enableAccessAnalyzer "true" \
+        enableConfigRecorder "true"
       ;;
   esac
 }
@@ -429,23 +432,23 @@ apply_profile_defaults() {
 select_install_mode() {
   wizard_ui_set_step 0 7
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
-    WIZARD_STATE[installMode]="simple"
+    wizard_state_set installMode "simple"
     return 0
   fi
   local choice
   choice="$(wizard_choose \
     "Install Mode" \
     "How much do you want to configure?" \
-    "${WIZARD_STATE[installMode]}" \
+    "$(wizard_state_get installMode)" \
     "simple" \
     "advanced")"
-  WIZARD_STATE[installMode]="${choice}"
+  wizard_state_set installMode "${choice}"
 }
 
 select_pack() {
   wizard_ui_set_step 1 7
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
-    WIZARD_STATE[pack]="openclaw"
+    wizard_state_set pack "openclaw"
     set_pack_defaults
     return 0
   fi
@@ -461,16 +464,16 @@ select_pack() {
   local choice
   choice="$(wizard_choose "Choose Agent Pack" "Select the AI agent to deploy." "" "${options[@]}")"
   [[ "${choice}" == "BACK" ]] && return 1
-  WIZARD_STATE[pack]="${choice%% — *}"
+  wizard_state_set pack "${choice%% — *}"
   set_pack_defaults
 }
 
 select_environment_name() {
   local total_steps=7
-  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && total_steps=12
+  [[ "$(wizard_state_get installMode)" == "advanced" ]] && total_steps=12
   wizard_ui_set_step 2 "${total_steps}"
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
-    [[ -n "${WIZARD_STATE[environmentName]}" ]] || WIZARD_STATE[environmentName]="${WIZARD_STATE[pack]}"
+    [[ -n "$(wizard_state_get environmentName)" ]] || wizard_state_set environmentName "$(wizard_state_get pack)"
     return 0
   fi
 
@@ -479,26 +482,26 @@ select_environment_name() {
     value="$(wizard_input \
       "Environment Name" \
       "Used as the AWS resource prefix." \
-      "${WIZARD_STATE[environmentName]}" \
-      "${WIZARD_STATE[pack]}" \
+      "$(wizard_state_get environmentName)" \
+      "$(wizard_state_get pack)" \
       false)" || return 1
-    value="${value:-${WIZARD_STATE[pack]}}"
+    value="${value:-$(wizard_state_get pack)}"
     if ! wizard_validate_environment_name "${value}" >/tmp/loki-wizard.err 2>&1; then
       wizard_error "$(cat /tmp/loki-wizard.err)"
       continue
     fi
-    WIZARD_STATE[environmentName]="${value}"
-    WIZARD_STATE[lokiWatermark]="${value}"
+    wizard_state_set environmentName "${value}"
+    wizard_state_set lokiWatermark "${value}"
     return 0
   done
 }
 
 select_profile() {
   local total_steps=7
-  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && total_steps=12
+  [[ "$(wizard_state_get installMode)" == "advanced" ]] && total_steps=12
   wizard_ui_set_step 3 "${total_steps}"
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
-    WIZARD_STATE[profile]="builder"
+    wizard_state_set profile "builder"
     apply_profile_defaults
     return 0
   fi
@@ -513,11 +516,11 @@ select_profile() {
     choice="$(wizard_choose "Choose Permission Profile" "What level of AWS access should the agent have?" "" "${opts[@]}")"
     [[ "${choice}" == "BACK" ]] && return 1
     profile="${choice%% — *}"
-    if ! wizard_validate_pack_profile "${WIZARD_STATE[pack]}" "${profile}" >/tmp/loki-wizard.err 2>&1; then
+    if ! wizard_validate_pack_profile "$(wizard_state_get pack)" "${profile}" >/tmp/loki-wizard.err 2>&1; then
       wizard_error "$(cat /tmp/loki-wizard.err)"
       continue
     fi
-    WIZARD_STATE[profile]="${profile}"
+    wizard_state_set profile "${profile}"
     apply_profile_defaults
     return 0
   done
@@ -535,32 +538,34 @@ enabled_provider_ids_for_pack() {
 
 select_provider() {
   local total_steps=7
-  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && total_steps=12
+  [[ "$(wizard_state_get installMode)" == "advanced" ]] && total_steps=12
   wizard_ui_set_step 4 "${total_steps}"
-  if [[ "${WIZARD_STATE[pack]}" == "kiro-cli" ]]; then
-    WIZARD_STATE[provider]="own-cloud"
-    WIZARD_STATE[providerAuthType]=""
-    WIZARD_STATE[providerRegion]=""
+  if [[ "$(wizard_state_get pack)" == "kiro-cli" ]]; then
+    wizard_state_set provider "own-cloud"
+    wizard_state_set providerAuthType ""
+    wizard_state_set providerRegion ""
     return 0
   fi
 
-  local -a supported
-  mapfile -t supported < <(enabled_provider_ids_for_pack "${WIZARD_STATE[pack]}")
+  local -a supported=()
+  while IFS= read -r line; do
+    supported+=("${line}")
+  done < <(enabled_provider_ids_for_pack "$(wizard_state_get pack)")
   if [[ ${#supported[@]} -eq 1 ]]; then
-    WIZARD_STATE[provider]="${supported[0]}"
+    wizard_state_set provider "${supported[0]}"
     set_provider_defaults
     return 0
   fi
 
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
-    WIZARD_STATE[provider]="bedrock"
+    wizard_state_set provider "bedrock"
     set_provider_defaults
     return 0
   fi
 
   local options=() provider status reason display line choice
   for provider in bedrock anthropic-api openai-api openrouter litellm; do
-    status="$(wizard_pack_provider_status_json "${WIZARD_STATE[pack]}" "${provider}")"
+    status="$(wizard_pack_provider_status_json "$(wizard_state_get pack)" "${provider}")"
     display="$(wizard_provider_display_name "${provider}")"
     if jq -e '.supported == true' <<<"${status}" >/dev/null; then
       line="${provider} — ${display}"
@@ -576,11 +581,11 @@ select_provider() {
     choice="$(wizard_choose "Choose LLM Provider" "How should the agent connect to AI models?" "" "${options[@]}")"
     [[ "${choice}" == "BACK" ]] && return 1
     provider="${choice%% — *}"
-    if ! wizard_validate_pack_provider "${WIZARD_STATE[pack]}" "${provider}" >/tmp/loki-wizard.err 2>&1; then
+    if ! wizard_validate_pack_provider "$(wizard_state_get pack)" "${provider}" >/tmp/loki-wizard.err 2>&1; then
       wizard_error "$(cat /tmp/loki-wizard.err)"
       continue
     fi
-    WIZARD_STATE[provider]="${provider}"
+    wizard_state_set provider "${provider}"
     set_provider_defaults
     return 0
   done
@@ -603,59 +608,69 @@ configure_provider_screen() {
 
 configure_provider() {
   local total_steps=7
-  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && total_steps=12
+  [[ "$(wizard_state_get installMode)" == "advanced" ]] && total_steps=12
   wizard_ui_set_step 5 "${total_steps}"
-  local provider="${WIZARD_STATE[provider]}"
+  local provider="$(wizard_state_get provider)"
   [[ "${provider}" == "own-cloud" ]] && return 0
 
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
     case "${provider}" in
-      bedrock) WIZARD_STATE[providerAuthType]="iam" ;;
-      anthropic-api) WIZARD_STATE[providerKey]="sk-ant-test-key" ;;
-      openai-api) WIZARD_STATE[providerKey]="sk-test-key" ;;
-      openrouter) WIZARD_STATE[providerKey]="or-test-key-12345" ;;
-      litellm) WIZARD_STATE[providerBaseUrl]="https://litellm.example.com" ;;
+      bedrock) wizard_state_set providerAuthType "iam" ;;
+      anthropic-api) wizard_state_set providerKey "sk-ant-test-key" ;;
+      openai-api) wizard_state_set providerKey "sk-test-key" ;;
+      openrouter) wizard_state_set providerKey "or-test-key-12345" ;;
+      litellm) wizard_state_set providerBaseUrl "https://litellm.example.com" ;;
     esac
     return 0
   fi
 
-  local action value
+  local action value summary primary_model provider_auth_type provider_region provider_base_url
   while true; do
+    provider_auth_type="$(wizard_state_get providerAuthType)"
+    provider_region="$(wizard_state_get providerRegion)"
+    provider_base_url="$(wizard_state_get providerBaseUrl)"
+    primary_model="$(wizard_state_get primaryModelOverride)"
+    [[ -z "${primary_model}" ]] && primary_model="(provider default)"
     case "${provider}" in
       bedrock)
+        summary="Auth: ${provider_auth_type:-iam} • Region: ${provider_region:-unset} • Model: ${primary_model}"
         action="$(configure_provider_screen \
           "Configure AWS Bedrock" \
-          "Auth: ${WIZARD_STATE[providerAuthType]:-iam} • Region: ${WIZARD_STATE[providerRegion]:-unset} • Model: ${WIZARD_STATE[primaryModelOverride]:-(provider default)}" \
+          "${summary}" \
           "Authentication Mode" \
           "Region" \
           "Bearer Token" \
           "Primary Model Override")" || return 1
         ;;
       anthropic-api)
+        summary="Key: $(wizard_mask_secret "$(wizard_state_get providerKey)" 7) • Model: ${primary_model}"
         action="$(configure_provider_screen \
           "Configure Anthropic API" \
-          "Key: $(wizard_mask_secret "${WIZARD_STATE[providerKey]}" 7) • Model: ${WIZARD_STATE[primaryModelOverride]:-(provider default)}" \
+          "${summary}" \
           "API Key" \
           "Primary Model Override")" || return 1
         ;;
       openai-api)
+        summary="Key: $(wizard_mask_secret "$(wizard_state_get providerKey)" 3) • Model: ${primary_model}"
         action="$(configure_provider_screen \
           "Configure OpenAI API" \
-          "Key: $(wizard_mask_secret "${WIZARD_STATE[providerKey]}" 3) • Model: ${WIZARD_STATE[primaryModelOverride]:-(provider default)}" \
+          "${summary}" \
           "API Key" \
           "Primary Model Override")" || return 1
         ;;
       openrouter)
+        summary="Key: $(wizard_mask_secret "$(wizard_state_get providerKey)" 3) • Model: ${primary_model}"
         action="$(configure_provider_screen \
           "Configure OpenRouter" \
-          "Key: $(wizard_mask_secret "${WIZARD_STATE[providerKey]}" 3) • Model: ${WIZARD_STATE[primaryModelOverride]:-(provider default)}" \
+          "${summary}" \
           "API Key" \
           "Primary Model Override")" || return 1
         ;;
       litellm)
+        summary="Base URL: ${provider_base_url:-unset} • Key: $(wizard_mask_secret "$(wizard_state_get providerKey)" 3) • Model: ${primary_model}"
         action="$(configure_provider_screen \
           "Configure LiteLLM" \
-          "Base URL: ${WIZARD_STATE[providerBaseUrl]:-unset} • Key: $(wizard_mask_secret "${WIZARD_STATE[providerKey]}" 3) • Model: ${WIZARD_STATE[primaryModelOverride]:-(provider default)}" \
+          "${summary}" \
           "Base URL" \
           "API Key" \
           "Primary Model Override")" || return 1
@@ -666,25 +681,25 @@ configure_provider() {
       NEXT)
         case "${provider}" in
           bedrock)
-            wizard_validate_region "${provider}" "${WIZARD_STATE[providerRegion]}" >/tmp/loki-wizard.err 2>&1 || {
+            wizard_validate_region "${provider}" "$(wizard_state_get providerRegion)" >/tmp/loki-wizard.err 2>&1 || {
               wizard_error "$(cat /tmp/loki-wizard.err)"
               continue
             }
-            if [[ "${WIZARD_STATE[providerAuthType]}" == "bearer" ]]; then
-              wizard_validate_api_key bedrock "${WIZARD_STATE[providerKey]}" bearer >/tmp/loki-wizard.err 2>&1 || {
+            if [[ "$(wizard_state_get providerAuthType)" == "bearer" ]]; then
+              wizard_validate_api_key bedrock "$(wizard_state_get providerKey)" bearer >/tmp/loki-wizard.err 2>&1 || {
                 wizard_error "$(cat /tmp/loki-wizard.err)"
                 continue
               }
             fi
             ;;
           anthropic-api|openai-api|openrouter)
-            wizard_validate_api_key "${provider}" "${WIZARD_STATE[providerKey]}" >/tmp/loki-wizard.err 2>&1 || {
+            wizard_validate_api_key "${provider}" "$(wizard_state_get providerKey)" >/tmp/loki-wizard.err 2>&1 || {
               wizard_error "$(cat /tmp/loki-wizard.err)"
               continue
             }
             ;;
           litellm)
-            wizard_validate_url "${WIZARD_STATE[providerBaseUrl]}" >/tmp/loki-wizard.err 2>&1 || {
+            wizard_validate_url "$(wizard_state_get providerBaseUrl)" >/tmp/loki-wizard.err 2>&1 || {
               wizard_error "$(cat /tmp/loki-wizard.err)"
               continue
             }
@@ -693,32 +708,32 @@ configure_provider() {
         return 0
         ;;
       "Authentication Mode")
-        value="$(wizard_choose "Bedrock Authentication" "Choose how Bedrock will authenticate." "${WIZARD_STATE[providerAuthType]}" "iam" "bearer" "BACK")"
-        [[ "${value}" == "BACK" ]] || WIZARD_STATE[providerAuthType]="${value}"
+        value="$(wizard_choose "Bedrock Authentication" "Choose how Bedrock will authenticate." "$(wizard_state_get providerAuthType)" "iam" "bearer" "BACK")"
+        [[ "${value}" == "BACK" ]] || wizard_state_set providerAuthType "${value}"
         ;;
       Region)
-        value="$(wizard_choose "Bedrock Region" "Select the AWS region for model inference." "${WIZARD_STATE[providerRegion]}" $(wizard_bedrock_regions) "BACK")"
-        [[ "${value}" == "BACK" ]] || WIZARD_STATE[providerRegion]="${value}"
+        value="$(wizard_choose "Bedrock Region" "Select the AWS region for model inference." "$(wizard_state_get providerRegion)" $(wizard_bedrock_regions) "BACK")"
+        [[ "${value}" == "BACK" ]] || wizard_state_set providerRegion "${value}"
         ;;
       "Bearer Token")
-        if [[ "${provider}" == "bedrock" && "${WIZARD_STATE[providerAuthType]}" != "bearer" ]]; then
+        if [[ "${provider}" == "bedrock" && "$(wizard_state_get providerAuthType)" != "bearer" ]]; then
           wizard_warning "Switch authentication mode to bearer before entering a token."
         else
-          value="$(wizard_input "Bearer Token" "ABS- token for Bedrock bearer auth." "${WIZARD_STATE[providerKey]}" "ABS-..." true)" || true
-          WIZARD_STATE[providerKey]="${value:-${WIZARD_STATE[providerKey]}}"
+          value="$(wizard_input "Bearer Token" "ABS- token for Bedrock bearer auth." "$(wizard_state_get providerKey)" "ABS-..." true)" || true
+          wizard_state_set providerKey "${value:-$(wizard_state_get providerKey)}"
         fi
         ;;
       "API Key")
-        value="$(wizard_input "API Key" "Key is kept in memory only." "${WIZARD_STATE[providerKey]}" "Paste API key" true)" || true
-        WIZARD_STATE[providerKey]="${value:-${WIZARD_STATE[providerKey]}}"
+        value="$(wizard_input "API Key" "Key is kept in memory only." "$(wizard_state_get providerKey)" "Paste API key" true)" || true
+        wizard_state_set providerKey "${value:-$(wizard_state_get providerKey)}"
         ;;
       "Base URL")
-        value="$(wizard_input "LiteLLM Base URL" "URL must start with http:// or https://." "${WIZARD_STATE[providerBaseUrl]}" "https://litellm.example.com" false)" || true
-        WIZARD_STATE[providerBaseUrl]="${value:-${WIZARD_STATE[providerBaseUrl]}}"
+        value="$(wizard_input "LiteLLM Base URL" "URL must start with http:// or https://." "$(wizard_state_get providerBaseUrl)" "https://litellm.example.com" false)" || true
+        wizard_state_set providerBaseUrl "${value:-$(wizard_state_get providerBaseUrl)}"
         ;;
       "Primary Model Override")
-        value="$(wizard_input "Primary Model Override" "Leave empty to use the provider default." "${WIZARD_STATE[primaryModelOverride]}" "$(wizard_provider_default "${provider}" primaryModel)" false)" || true
-        WIZARD_STATE[primaryModelOverride]="${value:-}"
+        value="$(wizard_input "Primary Model Override" "Leave empty to use the provider default." "$(wizard_state_get primaryModelOverride)" "$(wizard_provider_default "${provider}" primaryModel)" false)" || true
+        wizard_state_set primaryModelOverride "${value:-}"
         ;;
     esac
   done
@@ -726,33 +741,47 @@ configure_provider() {
 
 advanced_model() {
   wizard_ui_set_step 6 12
-  local provider="${WIZARD_STATE[provider]}"
-  local action value rc
+  local provider="$(wizard_state_get provider)"
+  local action value rc primary fallback context_window max_tokens hermes_model summary
   local -a options=(
     "Primary Model"
     "Fallback Model"
     "Context Window"
     "Max Output Tokens"
   )
-  if [[ "${WIZARD_STATE[pack]}" == "hermes" ]]; then
+  if [[ "$(wizard_state_get pack)" == "hermes" ]]; then
     options+=("Hermes Model")
   fi
   while true; do
+    primary="$(wizard_state_get primaryModelOverride)"
+    [[ -z "${primary}" ]] && primary="$(wizard_provider_default "${provider}" primaryModel)"
+    fallback="$(wizard_state_get fallbackModelOverride)"
+    [[ -z "${fallback}" ]] && fallback="$(wizard_provider_default "${provider}" fallbackModel)"
+    context_window="$(wizard_state_get contextWindowOverride)"
+    [[ -z "${context_window}" ]] && context_window="auto"
+    max_tokens="$(wizard_state_get maxTokensOverride)"
+    [[ -z "${max_tokens}" ]] && max_tokens="auto"
+    summary="Primary: ${primary} • Fallback: ${fallback} • Context: ${context_window} • Max tokens: ${max_tokens}"
+    if [[ "$(wizard_state_get pack)" == "hermes" ]]; then
+      hermes_model="$(wizard_state_get hermesModel)"
+      [[ -z "${hermes_model}" ]] && hermes_model="(provider primary)"
+      summary+=" • Hermes: ${hermes_model}"
+    fi
     action="$(configure_provider_screen \
       "Advanced — Model Configuration" \
-      "Primary: ${WIZARD_STATE[primaryModelOverride]:-$(wizard_provider_default "${provider}" primaryModel)} • Fallback: ${WIZARD_STATE[fallbackModelOverride]:-$(wizard_provider_default "${provider}" fallbackModel)} • Context: ${WIZARD_STATE[contextWindowOverride]:-auto} • Max tokens: ${WIZARD_STATE[maxTokensOverride]:-auto}$([[ "${WIZARD_STATE[pack]}" == "hermes" ]] && printf ' • Hermes: %s' "${WIZARD_STATE[hermesModel]:-(provider primary)}")" \
+      "${summary}" \
       "${options[@]}")" || return 1
     case "${action}" in
       NEXT)
-        wizard_validate_positive_int "${WIZARD_STATE[contextWindowOverride]}" "Context window" >/tmp/loki-wizard.err 2>&1 || {
+        wizard_validate_positive_int "$(wizard_state_get contextWindowOverride)" "Context window" >/tmp/loki-wizard.err 2>&1 || {
           wizard_error "$(cat /tmp/loki-wizard.err)"
           continue
         }
-        wizard_validate_positive_int "${WIZARD_STATE[maxTokensOverride]}" "Max output tokens" >/tmp/loki-wizard.err 2>&1 || {
+        wizard_validate_positive_int "$(wizard_state_get maxTokensOverride)" "Max output tokens" >/tmp/loki-wizard.err 2>&1 || {
           wizard_error "$(cat /tmp/loki-wizard.err)"
           continue
         }
-        wizard_validate_model_override "${provider}" "${WIZARD_STATE[primaryModelOverride]}" >/tmp/loki-wizard.err 2>&1
+        wizard_validate_model_override "${provider}" "$(wizard_state_get primaryModelOverride)" >/tmp/loki-wizard.err 2>&1
         rc=$?
         if [[ ${rc} -eq 2 ]]; then
           wizard_warning "Primary override is not in the provider manifest. Continuing with explicit override."
@@ -760,7 +789,7 @@ advanced_model() {
           wizard_error "Primary model validation failed"
           continue
         fi
-        wizard_validate_model_override "${provider}" "${WIZARD_STATE[hermesModel]}" >/tmp/loki-wizard.err 2>&1
+        wizard_validate_model_override "${provider}" "$(wizard_state_get hermesModel)" >/tmp/loki-wizard.err 2>&1
         rc=$?
         if [[ ${rc} -eq 2 ]]; then
           wizard_warning "Hermes override is not in the provider manifest. Continuing with explicit override."
@@ -771,24 +800,26 @@ advanced_model() {
         return 0
         ;;
       "Primary Model")
-        value="$(wizard_input "Primary Model Override" "Leave empty to use the provider default." "${WIZARD_STATE[primaryModelOverride]}" "$(wizard_provider_default "${provider}" primaryModel)" false)" || true
-        WIZARD_STATE[primaryModelOverride]="${value:-}"
+        value="$(wizard_input "Primary Model Override" "Leave empty to use the provider default." "$(wizard_state_get primaryModelOverride)" "$(wizard_provider_default "${provider}" primaryModel)" false)" || true
+        wizard_state_set primaryModelOverride "${value:-}"
         ;;
       "Fallback Model")
-        value="$(wizard_input "Fallback Model Override" "Leave empty to use the provider default." "${WIZARD_STATE[fallbackModelOverride]}" "$(wizard_provider_default "${provider}" fallbackModel)" false)" || true
-        WIZARD_STATE[fallbackModelOverride]="${value:-}"
+        value="$(wizard_input "Fallback Model Override" "Leave empty to use the provider default." "$(wizard_state_get fallbackModelOverride)" "$(wizard_provider_default "${provider}" fallbackModel)" false)" || true
+        wizard_state_set fallbackModelOverride "${value:-}"
         ;;
       "Context Window")
-        value="$(wizard_input "Context Window" "Positive integer only." "${WIZARD_STATE[contextWindowOverride]}" "200000" false)" || true
-        WIZARD_STATE[contextWindowOverride]="${value:-}"
+        value="$(wizard_input "Context Window" "Positive integer only." "$(wizard_state_get contextWindowOverride)" "200000" false)" || true
+        wizard_state_set contextWindowOverride "${value:-}"
         ;;
       "Max Output Tokens")
-        value="$(wizard_input "Max Output Tokens" "Positive integer only." "${WIZARD_STATE[maxTokensOverride]}" "16384" false)" || true
-        WIZARD_STATE[maxTokensOverride]="${value:-}"
+        value="$(wizard_input "Max Output Tokens" "Positive integer only." "$(wizard_state_get maxTokensOverride)" "16384" false)" || true
+        wizard_state_set maxTokensOverride "${value:-}"
         ;;
       "Hermes Model")
-        value="$(wizard_input "Hermes Model" "Leave empty to use the provider primary model." "${WIZARD_STATE[hermesModel]}" "${WIZARD_STATE[primaryModelOverride]:-$(wizard_provider_default "${provider}" primaryModel)}" false)" || true
-        WIZARD_STATE[hermesModel]="${value:-}"
+        primary="$(wizard_state_get primaryModelOverride)"
+        [[ -z "${primary}" ]] && primary="$(wizard_provider_default "${provider}" primaryModel)"
+        value="$(wizard_input "Hermes Model" "Leave empty to use the provider primary model." "$(wizard_state_get hermesModel)" "${primary}" false)" || true
+        wizard_state_set hermesModel "${value:-}"
         ;;
     esac
   done
@@ -801,37 +832,37 @@ advanced_instance() {
   while true; do
     action="$(configure_provider_screen \
       "Advanced — Instance Configuration" \
-      "Instance: ${WIZARD_STATE[instanceType]} • Root: ${WIZARD_STATE[rootVolumeGb]} GB • Data: ${WIZARD_STATE[dataVolumeGb]} GB" \
+      "Instance: $(wizard_state_get instanceType) • Root: $(wizard_state_get rootVolumeGb) GB • Data: $(wizard_state_get dataVolumeGb) GB" \
       "Instance Type" \
       "Root Volume" \
       "Data Volume")" || return 1
     case "${action}" in
       NEXT)
-        wizard_validate_instance_type "${WIZARD_STATE[pack]}" "${WIZARD_STATE[instanceType]}" >/tmp/loki-wizard.err 2>&1 || {
+        wizard_validate_instance_type "$(wizard_state_get pack)" "$(wizard_state_get instanceType)" >/tmp/loki-wizard.err 2>&1 || {
           wizard_error "$(cat /tmp/loki-wizard.err)"
           continue
         }
-        wizard_validate_volume_size "${WIZARD_STATE[rootVolumeGb]}" 20 200 false "Root volume" >/tmp/loki-wizard.err 2>&1 || {
+        wizard_validate_volume_size "$(wizard_state_get rootVolumeGb)" 20 200 false "Root volume" >/tmp/loki-wizard.err 2>&1 || {
           wizard_error "$(cat /tmp/loki-wizard.err)"
           continue
         }
-        wizard_validate_volume_size "${WIZARD_STATE[dataVolumeGb]}" 20 500 true "Data volume" >/tmp/loki-wizard.err 2>&1 || {
+        wizard_validate_volume_size "$(wizard_state_get dataVolumeGb)" 20 500 true "Data volume" >/tmp/loki-wizard.err 2>&1 || {
           wizard_error "$(cat /tmp/loki-wizard.err)"
           continue
         }
         return 0
         ;;
       "Instance Type")
-        value="$(wizard_choose "Instance Type" "Choose the compute size." "${WIZARD_STATE[instanceType]}" "${choices[@]}")"
-        [[ "${value}" == "BACK" ]] || WIZARD_STATE[instanceType]="${value}"
+        value="$(wizard_choose "Instance Type" "Choose the compute size." "$(wizard_state_get instanceType)" "${choices[@]}")"
+        [[ "${value}" == "BACK" ]] || wizard_state_set instanceType "${value}"
         ;;
       "Root Volume")
-        value="$(wizard_input "Root Volume" "Allowed range: 20-200 GB." "${WIZARD_STATE[rootVolumeGb]}" "40" false)" || true
-        WIZARD_STATE[rootVolumeGb]="${value:-${WIZARD_STATE[rootVolumeGb]}}"
+        value="$(wizard_input "Root Volume" "Allowed range: 20-200 GB." "$(wizard_state_get rootVolumeGb)" "40" false)" || true
+        wizard_state_set rootVolumeGb "${value:-$(wizard_state_get rootVolumeGb)}"
         ;;
       "Data Volume")
-        value="$(wizard_input "Data Volume" "Use 0 to skip, or 20-500 GB." "${WIZARD_STATE[dataVolumeGb]}" "80" false)" || true
-        WIZARD_STATE[dataVolumeGb]="${value:-${WIZARD_STATE[dataVolumeGb]}}"
+        value="$(wizard_input "Data Volume" "Use 0 to skip, or 20-500 GB." "$(wizard_state_get dataVolumeGb)" "80" false)" || true
+        wizard_state_set dataVolumeGb "${value:-$(wizard_state_get dataVolumeGb)}"
         ;;
     esac
   done
@@ -844,7 +875,8 @@ simple_vpc_mode() {
   local -a vpc_rows=()
   local -a vpc_ids=()
 
-  region="${WIZARD_STATE[providerRegion]:-us-east-1}"
+  region="$(wizard_state_get providerRegion)"
+  [[ -z "${region}" ]] && region="us-east-1"
   if [[ -n "${GUM:-}" ]] && command -v "${GUM}" >/dev/null 2>&1; then
     gum_ready=true
   fi
@@ -858,9 +890,9 @@ simple_vpc_mode() {
   fi
 
   if [[ -n "${CLI_EXISTING_VPC_ID}" || -n "${CLI_EXISTING_SUBNET_ID}" ]]; then
-    WIZARD_STATE[vpcMode]="existing"
-    [[ -n "${CLI_EXISTING_VPC_ID}" ]] && WIZARD_STATE[existingVpcId]="${CLI_EXISTING_VPC_ID}"
-    [[ -n "${CLI_EXISTING_SUBNET_ID}" ]] && WIZARD_STATE[existingSubnetId]="${CLI_EXISTING_SUBNET_ID}"
+    wizard_state_set vpcMode "existing"
+    [[ -n "${CLI_EXISTING_VPC_ID}" ]] && wizard_state_set existingVpcId "${CLI_EXISTING_VPC_ID}"
+    [[ -n "${CLI_EXISTING_SUBNET_ID}" ]] && wizard_state_set existingSubnetId "${CLI_EXISTING_SUBNET_ID}"
     if [[ "${gum_ready}" == "true" ]] && declare -F wizard_ok >/dev/null 2>&1; then
       wizard_ok "Using CLI-provided VPC settings"
     elif [[ "${gum_ready}" == "true" ]] && declare -F wizard_success >/dev/null 2>&1; then
@@ -879,9 +911,9 @@ simple_vpc_mode() {
     else
       echo "aws CLI not found; proceeding with a new VPC"
     fi
-    WIZARD_STATE[vpcMode]="new"
-    WIZARD_STATE[existingVpcId]=""
-    WIZARD_STATE[existingSubnetId]=""
+    wizard_state_set vpcMode "new"
+    wizard_state_set existingVpcId ""
+    wizard_state_set existingSubnetId ""
     return 0
   fi
 
@@ -898,9 +930,9 @@ simple_vpc_mode() {
   )
 
   if [[ ${#vpc_ids[@]} -eq 0 ]]; then
-    WIZARD_STATE[vpcMode]="new"
-    WIZARD_STATE[existingVpcId]=""
-    WIZARD_STATE[existingSubnetId]=""
+    wizard_state_set vpcMode "new"
+    wizard_state_set existingVpcId ""
+    wizard_state_set existingSubnetId ""
     return 0
   fi
 
@@ -925,9 +957,9 @@ simple_vpc_mode() {
   fi
 
   if [[ "${reuse_vpc}" != "true" ]]; then
-    WIZARD_STATE[vpcMode]="new"
-    WIZARD_STATE[existingVpcId]=""
-    WIZARD_STATE[existingSubnetId]=""
+    wizard_state_set vpcMode "new"
+    wizard_state_set existingVpcId ""
+    wizard_state_set existingSubnetId ""
     return 0
   fi
 
@@ -990,9 +1022,9 @@ simple_vpc_mode() {
   done
 
   if [[ -n "${subnet_id}" && "${subnet_id}" != "None" ]]; then
-    WIZARD_STATE[vpcMode]="existing"
-    WIZARD_STATE[existingVpcId]="${chosen_vpc}"
-    WIZARD_STATE[existingSubnetId]="${subnet_id}"
+    wizard_state_set vpcMode "existing"
+    wizard_state_set existingVpcId "${chosen_vpc}"
+    wizard_state_set existingSubnetId "${subnet_id}"
     if [[ "${gum_ready}" == "true" ]] && declare -F wizard_ok >/dev/null 2>&1; then
       wizard_ok "Reusing VPC ${chosen_vpc} with subnet ${subnet_id}"
     elif [[ "${gum_ready}" == "true" ]] && declare -F wizard_success >/dev/null 2>&1; then
@@ -1001,9 +1033,9 @@ simple_vpc_mode() {
       echo "Reusing VPC ${chosen_vpc} with subnet ${subnet_id}"
     fi
   else
-    WIZARD_STATE[vpcMode]="new"
-    WIZARD_STATE[existingVpcId]=""
-    WIZARD_STATE[existingSubnetId]=""
+    wizard_state_set vpcMode "new"
+    wizard_state_set existingVpcId ""
+    wizard_state_set existingSubnetId ""
     if [[ "${gum_ready}" == "true" ]] && declare -F wizard_warn >/dev/null 2>&1; then
       wizard_warn "Could not find a public subnet in ${chosen_vpc}; proceeding with a new VPC"
     elif [[ "${gum_ready}" == "true" ]] && declare -F wizard_warning >/dev/null 2>&1; then
@@ -1016,11 +1048,13 @@ simple_vpc_mode() {
 
 advanced_networking() {
   wizard_ui_set_step 8 12
-  local action value
+  local action value existing_vpc_display
   while true; do
+    existing_vpc_display="$(wizard_state_get existingVpcId)"
+    [[ -z "${existing_vpc_display}" ]] && existing_vpc_display="none"
     action="$(configure_provider_screen \
       "Advanced — Networking" \
-      "VPC: ${WIZARD_STATE[vpcMode]} • SSH: ${WIZARD_STATE[sshAccessMode]} • Branch: ${WIZARD_STATE[repoBranch]} • Gateway: ${WIZARD_STATE[gwPort]} • Existing VPC: ${WIZARD_STATE[existingVpcId]:-none}" \
+      "VPC: $(wizard_state_get vpcMode) • SSH: $(wizard_state_get sshAccessMode) • Branch: $(wizard_state_get repoBranch) • Gateway: $(wizard_state_get gwPort) • Existing VPC: ${existing_vpc_display}" \
       "VPC Mode" \
       "Existing VPC ID" \
       "Existing Subnet ID" \
@@ -1032,70 +1066,70 @@ advanced_networking() {
       "Allowed Chat IDs")" || return 1
     case "${action}" in
       NEXT)
-        if [[ "${WIZARD_STATE[vpcMode]}" == "existing" ]]; then
-          [[ -n "${WIZARD_STATE[existingVpcId]}" && -n "${WIZARD_STATE[existingSubnetId]}" ]] || {
+        if [[ "$(wizard_state_get vpcMode)" == "existing" ]]; then
+          [[ -n "$(wizard_state_get existingVpcId)" && -n "$(wizard_state_get existingSubnetId)" ]] || {
             wizard_error "Existing VPC mode requires both VPC ID and subnet ID."
             continue
           }
         fi
-        wizard_validate_positive_int "${WIZARD_STATE[gwPort]}" "Gateway port" >/tmp/loki-wizard.err 2>&1 || {
+        wizard_validate_positive_int "$(wizard_state_get gwPort)" "Gateway port" >/tmp/loki-wizard.err 2>&1 || {
           wizard_error "$(cat /tmp/loki-wizard.err)"
           continue
         }
-        if [[ "${WIZARD_STATE[sshAccessMode]}" == "ssm-only" ]]; then
-          WIZARD_STATE[keyPairName]=""
-          WIZARD_STATE[sshAllowedCidr]="127.0.0.1/32"
+        if [[ "$(wizard_state_get sshAccessMode)" == "ssm-only" ]]; then
+          wizard_state_set keyPairName ""
+          wizard_state_set sshAllowedCidr "127.0.0.1/32"
         fi
-        wizard_validate_telegram_token "${WIZARD_STATE[telegramToken]}" >/tmp/loki-wizard.err 2>&1 || {
+        wizard_validate_telegram_token "$(wizard_state_get telegramToken)" >/tmp/loki-wizard.err 2>&1 || {
           wizard_error "$(cat /tmp/loki-wizard.err)"
           continue
         }
-        wizard_validate_chat_ids "${WIZARD_STATE[allowedChatIds]}" >/tmp/loki-wizard.err 2>&1 || {
+        wizard_validate_chat_ids "$(wizard_state_get allowedChatIds)" >/tmp/loki-wizard.err 2>&1 || {
           wizard_error "$(cat /tmp/loki-wizard.err)"
           continue
         }
         return 0
         ;;
       "VPC Mode")
-        value="$(wizard_choose "VPC Mode" "Create new VPC or reuse an existing one." "${WIZARD_STATE[vpcMode]}" new existing BACK)"
-        [[ "${value}" == "BACK" ]] || WIZARD_STATE[vpcMode]="${value}"
+        value="$(wizard_choose "VPC Mode" "Create new VPC or reuse an existing one." "$(wizard_state_get vpcMode)" new existing BACK)"
+        [[ "${value}" == "BACK" ]] || wizard_state_set vpcMode "${value}"
         ;;
       "Existing VPC ID")
-        value="$(wizard_input "Existing VPC ID" "Only used when VPC mode is existing." "${WIZARD_STATE[existingVpcId]}" "vpc-..." false)" || true
-        WIZARD_STATE[existingVpcId]="${value:-${WIZARD_STATE[existingVpcId]}}"
+        value="$(wizard_input "Existing VPC ID" "Only used when VPC mode is existing." "$(wizard_state_get existingVpcId)" "vpc-..." false)" || true
+        wizard_state_set existingVpcId "${value:-$(wizard_state_get existingVpcId)}"
         ;;
       "Existing Subnet ID")
-        value="$(wizard_input "Existing Subnet ID" "Only used when VPC mode is existing." "${WIZARD_STATE[existingSubnetId]}" "subnet-..." false)" || true
-        WIZARD_STATE[existingSubnetId]="${value:-${WIZARD_STATE[existingSubnetId]}}"
+        value="$(wizard_input "Existing Subnet ID" "Only used when VPC mode is existing." "$(wizard_state_get existingSubnetId)" "subnet-..." false)" || true
+        wizard_state_set existingSubnetId "${value:-$(wizard_state_get existingSubnetId)}"
         ;;
       "SSH Access")
-        value="$(wizard_choose "SSH Access" "SSM only is recommended." "${WIZARD_STATE[sshAccessMode]}" ssm-only keypair BACK)"
+        value="$(wizard_choose "SSH Access" "SSM only is recommended." "$(wizard_state_get sshAccessMode)" ssm-only keypair BACK)"
         if [[ "${value}" != "BACK" ]]; then
-          WIZARD_STATE[sshAccessMode]="${value}"
+          wizard_state_set sshAccessMode "${value}"
           if [[ "${value}" == "ssm-only" ]]; then
-            WIZARD_STATE[sshAllowedCidr]="127.0.0.1/32"
+            wizard_state_set sshAllowedCidr "127.0.0.1/32"
           fi
         fi
         ;;
       "Key Pair Name")
-        value="$(wizard_input "Key Pair Name" "Required only when SSH access is keypair." "${WIZARD_STATE[keyPairName]}" "my-keypair" false)" || true
-        WIZARD_STATE[keyPairName]="${value:-${WIZARD_STATE[keyPairName]}}"
+        value="$(wizard_input "Key Pair Name" "Required only when SSH access is keypair." "$(wizard_state_get keyPairName)" "my-keypair" false)" || true
+        wizard_state_set keyPairName "${value:-$(wizard_state_get keyPairName)}"
         ;;
       "Repo Branch")
-        value="$(wizard_input "Repo Branch" "Git branch to deploy from." "${WIZARD_STATE[repoBranch]}" "main" false)" || true
-        WIZARD_STATE[repoBranch]="${value:-${WIZARD_STATE[repoBranch]}}"
+        value="$(wizard_input "Repo Branch" "Git branch to deploy from." "$(wizard_state_get repoBranch)" "main" false)" || true
+        wizard_state_set repoBranch "${value:-$(wizard_state_get repoBranch)}"
         ;;
       "Gateway Port")
-        value="$(wizard_input "Gateway Port" "Positive integer only." "${WIZARD_STATE[gwPort]}" "3001" false)" || true
-        WIZARD_STATE[gwPort]="${value:-${WIZARD_STATE[gwPort]}}"
+        value="$(wizard_input "Gateway Port" "Positive integer only." "$(wizard_state_get gwPort)" "3001" false)" || true
+        wizard_state_set gwPort "${value:-$(wizard_state_get gwPort)}"
         ;;
       "Telegram Token")
-        value="$(wizard_input "Telegram Token" "Optional unless bot features are needed." "${WIZARD_STATE[telegramToken]}" "123456789:AA..." true)" || true
-        WIZARD_STATE[telegramToken]="${value:-${WIZARD_STATE[telegramToken]}}"
+        value="$(wizard_input "Telegram Token" "Optional unless bot features are needed." "$(wizard_state_get telegramToken)" "123456789:AA..." true)" || true
+        wizard_state_set telegramToken "${value:-$(wizard_state_get telegramToken)}"
         ;;
       "Allowed Chat IDs")
-        value="$(wizard_input "Allowed Chat IDs" "Comma-separated integers." "${WIZARD_STATE[allowedChatIds]}" "1775159795" false)" || true
-        WIZARD_STATE[allowedChatIds]="${value:-${WIZARD_STATE[allowedChatIds]}}"
+        value="$(wizard_input "Allowed Chat IDs" "Comma-separated integers." "$(wizard_state_get allowedChatIds)" "1775159795" false)" || true
+        wizard_state_set allowedChatIds "${value:-$(wizard_state_get allowedChatIds)}"
         ;;
     esac
   done
@@ -1104,17 +1138,17 @@ advanced_networking() {
 advanced_deploy_method() {
   wizard_ui_set_step 9 12
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
-    WIZARD_STATE[deployMethod]="cfn-cli"
+    wizard_state_set deployMethod "cfn-cli"
     return 0
   fi
   local choice
   choice="$(wizard_choose \
     "Advanced — Deployment Method" \
     "Choose how the stack should be deployed." \
-    "${WIZARD_STATE[deployMethod]}" \
+    "$(wizard_state_get deployMethod)" \
     cfn-cli cfn-console terraform BACK)"
   [[ "${choice}" == "BACK" ]] && return 1
-  WIZARD_STATE[deployMethod]="${choice}"
+  wizard_state_set deployMethod "${choice}"
 }
 
 advanced_security_services() {
@@ -1135,57 +1169,61 @@ advanced_security_services() {
     "Bedrock Model Access Form" \
     "Request Quota Increases")" || return 1
 
-  WIZARD_STATE[enableSecurityHub]="false"
-  WIZARD_STATE[enableGuardDuty]="false"
-  WIZARD_STATE[enableInspector]="false"
-  WIZARD_STATE[enableAccessAnalyzer]="false"
-  WIZARD_STATE[enableConfigRecorder]="false"
-  WIZARD_STATE[enableBedrockForm]="false"
-  WIZARD_STATE[requestQuotaIncreases]="false"
+  wizard_state_set_many \
+    enableSecurityHub "false" \
+    enableGuardDuty "false" \
+    enableInspector "false" \
+    enableAccessAnalyzer "false" \
+    enableConfigRecorder "false" \
+    enableBedrockForm "false" \
+    requestQuotaIncreases "false"
   while IFS= read -r service; do
     case "${service}" in
-      "AWS Security Hub") WIZARD_STATE[enableSecurityHub]="true" ;;
-      "Amazon GuardDuty") WIZARD_STATE[enableGuardDuty]="true" ;;
-      "Amazon Inspector") WIZARD_STATE[enableInspector]="true" ;;
-      "IAM Access Analyzer") WIZARD_STATE[enableAccessAnalyzer]="true" ;;
-      "AWS Config Recorder") WIZARD_STATE[enableConfigRecorder]="true" ;;
-      "Bedrock Model Access Form") WIZARD_STATE[enableBedrockForm]="true" ;;
-      "Request Quota Increases") WIZARD_STATE[requestQuotaIncreases]="true" ;;
+      "AWS Security Hub") wizard_state_set enableSecurityHub "true" ;;
+      "Amazon GuardDuty") wizard_state_set enableGuardDuty "true" ;;
+      "Amazon Inspector") wizard_state_set enableInspector "true" ;;
+      "IAM Access Analyzer") wizard_state_set enableAccessAnalyzer "true" ;;
+      "AWS Config Recorder") wizard_state_set enableConfigRecorder "true" ;;
+      "Bedrock Model Access Form") wizard_state_set enableBedrockForm "true" ;;
+      "Request Quota Increases") wizard_state_set requestQuotaIncreases "true" ;;
     esac
   done <<<"${selected}"
 }
 
 review_summary_text() {
   local provider_display primary fallback lines
-  provider_display="$(wizard_provider_display_name "${WIZARD_STATE[provider]}")"
-  [[ "${WIZARD_STATE[provider]}" == "own-cloud" ]] && provider_display="own-cloud"
-  primary="${WIZARD_STATE[primaryModelOverride]:-$(wizard_provider_default "${WIZARD_STATE[provider]}" primaryModel)}"
-  fallback="${WIZARD_STATE[fallbackModelOverride]:-$(wizard_provider_default "${WIZARD_STATE[provider]}" fallbackModel)}"
-  lines="Environment     ${WIZARD_STATE[environmentName]}\n"
-  lines+="Agent Pack      $(wizard_pack_display_name "${WIZARD_STATE[pack]}")\n"
-  lines+="Profile         ${WIZARD_STATE[profile]}\n"
+  provider_display="$(wizard_provider_display_name "$(wizard_state_get provider)")"
+  [[ "$(wizard_state_get provider)" == "own-cloud" ]] && provider_display="own-cloud"
+  primary="$(wizard_state_get primaryModelOverride)"
+  [[ -z "${primary}" ]] && primary="$(wizard_provider_default "$(wizard_state_get provider)" primaryModel)"
+  fallback="$(wizard_state_get fallbackModelOverride)"
+  [[ -z "${fallback}" ]] && fallback="$(wizard_provider_default "$(wizard_state_get provider)" fallbackModel)"
+  lines="Environment     $(wizard_state_get environmentName)\n"
+  lines+="Agent Pack      $(wizard_pack_display_name "$(wizard_state_get pack)")\n"
+  lines+="Profile         $(wizard_state_get profile)\n"
   lines+="Provider        ${provider_display}\n"
-  [[ -n "${WIZARD_STATE[providerRegion]}" ]] && lines+="Region          ${WIZARD_STATE[providerRegion]}\n"
+  [[ -n "$(wizard_state_get providerRegion)" ]] && lines+="Region          $(wizard_state_get providerRegion)\n"
   [[ -n "${primary}" ]] && lines+="Primary Model   ${primary}\n"
   [[ -n "${fallback}" ]] && lines+="Fallback Model  ${fallback}\n"
-  lines+="Instance        ${WIZARD_STATE[instanceType]}\n"
-  lines+="Storage         root ${WIZARD_STATE[rootVolumeGb]} GB / data ${WIZARD_STATE[dataVolumeGb]} GB\n"
-  lines+="Networking      ${WIZARD_STATE[vpcMode]} VPC • ${WIZARD_STATE[sshAccessMode]}\n"
-  lines+="Deploy Method   ${WIZARD_STATE[deployMethod]}\n"
-  [[ "${WIZARD_STATE[pack]}" == "kiro-cli" ]] && lines+="Post-install    kiro-cli login --use-device-flow\n"
+  lines+="Instance        $(wizard_state_get instanceType)\n"
+  lines+="Storage         root $(wizard_state_get rootVolumeGb) GB / data $(wizard_state_get dataVolumeGb) GB\n"
+  lines+="Networking      $(wizard_state_get vpcMode) VPC • $(wizard_state_get sshAccessMode)\n"
+  lines+="Deploy Method   $(wizard_state_get deployMethod)\n"
+  [[ "$(wizard_state_get pack)" == "kiro-cli" ]] && lines+="Post-install    kiro-cli login --use-device-flow\n"
   printf '%b' "${lines}"
 }
 
 review_screen() {
   wizard_ui_set_step 6 7
-  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && wizard_ui_set_step 11 12
+  [[ "$(wizard_state_get installMode)" == "advanced" ]] && wizard_ui_set_step 11 12
 
   while true; do
-    WIZARD_STATE[lokiWatermark]="${WIZARD_STATE[environmentName]}"
-    PARTIAL_COMMAND="$(build_bootstrap_command WIZARD_STATE | tr -d '\n')"
-    WIZARD_STATE[generatedBootstrapCommand]="${PARTIAL_COMMAND}"
-    WIZARD_STATE[generatedCfnParams]="$(build_cfn_params WIZARD_STATE | jq -c .)"
-    WIZARD_STATE[generatedTerraformVars]="$(build_terraform_vars WIZARD_STATE | jq -c .)"
+    wizard_state_set lokiWatermark "$(wizard_state_get environmentName)"
+    PARTIAL_COMMAND="$(build_bootstrap_command | tr -d '\n')"
+    wizard_state_set_many \
+      generatedBootstrapCommand "${PARTIAL_COMMAND}" \
+      generatedCfnParams "$(build_cfn_params | jq -c .)" \
+      generatedTerraformVars "$(build_terraform_vars | jq -c .)"
 
     wizard_header "Review & Deploy" "Validate the final configuration before running deploy/bootstrap.sh."
     wizard_summary "$(review_summary_text)"
@@ -1235,48 +1273,53 @@ review_screen() {
 
 deploy_screen() {
   wizard_ui_set_step 7 7
-  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && wizard_ui_set_step 12 12
-  PARTIAL_COMMAND="$(build_bootstrap_command WIZARD_STATE | tr -d '\n')"
-  WIZARD_STATE[generatedBootstrapCommand]="${PARTIAL_COMMAND}"
+  [[ "$(wizard_state_get installMode)" == "advanced" ]] && wizard_ui_set_step 12 12
+  PARTIAL_COMMAND="$(build_bootstrap_command | tr -d '\n')"
+  wizard_state_set generatedBootstrapCommand "${PARTIAL_COMMAND}"
 
   if [[ "${DRY_RUN}" == "true" ]]; then
     echo "STATE_JSON:"
     wizard_state_json
     echo
     echo "BOOTSTRAP_COMMAND:"
-    echo "${WIZARD_STATE[generatedBootstrapCommand]}"
+    echo "$(wizard_state_get generatedBootstrapCommand)"
     echo
     echo "CFN_PARAMS:"
-    jq . <<<"${WIZARD_STATE[generatedCfnParams]}"
+    jq . <<<"$(wizard_state_get generatedCfnParams)"
     echo
     echo "TERRAFORM_VARS:"
-    jq . <<<"${WIZARD_STATE[generatedTerraformVars]}"
+    jq . <<<"$(wizard_state_get generatedTerraformVars)"
     return 0
   fi
 
   wizard_header "Deploy" "Executing the selected deployment flow."
-  echo "${WIZARD_STATE[generatedBootstrapCommand]}"
+  echo "$(wizard_state_get generatedBootstrapCommand)"
   echo
-  if [[ "${WIZARD_STATE[deployMethod]}" == "cfn-console" ]]; then
+  if [[ "$(wizard_state_get deployMethod)" == "cfn-console" ]]; then
     echo "CloudFormation console parameter set:"
-    jq . <<<"${WIZARD_STATE[generatedCfnParams]}"
+    jq . <<<"$(wizard_state_get generatedCfnParams)"
     return 0
   fi
-  if [[ "${WIZARD_STATE[deployMethod]}" == "terraform" ]]; then
+  if [[ "$(wizard_state_get deployMethod)" == "terraform" ]]; then
     echo "Terraform variables:"
-    jq . <<<"${WIZARD_STATE[generatedTerraformVars]}"
+    jq . <<<"$(wizard_state_get generatedTerraformVars)"
     return 0
   fi
-  if [[ "${WIZARD_STATE[deployMethod]}" == "cfn-cli" ]]; then
+  if [[ "$(wizard_state_get deployMethod)" == "cfn-cli" ]]; then
     local stack_name region template_path stack_id
     local -a cfn_params template_arg create_stack_args
 
-    stack_name="${WIZARD_STATE[environmentName]}"
-    region="${WIZARD_STATE[providerRegion]:-us-east-1}"
+    stack_name="$(wizard_state_get environmentName)"
+    region="$(wizard_state_get providerRegion)"
+    [[ -z "${region}" ]] && region="us-east-1"
     template_path="${REPO_ROOT}/deploy/cloudformation/template.yaml"
 
-    mapfile -d '' -t cfn_params < <(format_wizard_cfn_cli_params "${WIZARD_STATE[generatedCfnParams]}")
-    mapfile -d '' -t template_arg < <(resolve_cfn_template_arg "${template_path}" "${stack_name}" "${region}")
+    while IFS= read -r -d '' item; do
+      cfn_params+=("${item}")
+    done < <(format_wizard_cfn_cli_params "$(wizard_state_get generatedCfnParams)")
+    while IFS= read -r -d '' item; do
+      template_arg+=("${item}")
+    done < <(resolve_cfn_template_arg "${template_path}" "${stack_name}" "${region}")
 
     create_stack_args=(
       cloudformation create-stack
@@ -1296,7 +1339,7 @@ deploy_screen() {
     return 0
   fi
 
-  (cd "${REPO_ROOT}" && eval "${WIZARD_STATE[generatedBootstrapCommand]}")
+  (cd "${REPO_ROOT}" && eval "$(wizard_state_get generatedBootstrapCommand)")
 }
 
 apply_scenario() {
@@ -1311,68 +1354,64 @@ apply_scenario() {
     1|simple-bedrock-iam)
       ;;
     2|simple-anthropic)
-      WIZARD_STATE[provider]="anthropic-api"
-      WIZARD_STATE[providerKey]="sk-ant-test-key"
+      wizard_state_set_many provider "anthropic-api" providerKey "sk-ant-test-key"
       ;;
     3|simple-openai)
-      WIZARD_STATE[provider]="openai-api"
-      WIZARD_STATE[providerKey]="sk-test-key"
+      wizard_state_set_many provider "openai-api" providerKey "sk-test-key"
       ;;
     4|simple-openrouter)
-      WIZARD_STATE[provider]="openrouter"
-      WIZARD_STATE[providerKey]="openrouter-test-key-12345"
+      wizard_state_set_many provider "openrouter" providerKey "openrouter-test-key-12345"
       ;;
     5|simple-litellm)
-      WIZARD_STATE[provider]="litellm"
-      WIZARD_STATE[providerBaseUrl]="https://litellm.example.com"
+      wizard_state_set_many provider "litellm" providerBaseUrl "https://litellm.example.com"
       ;;
     6|hermes-anthropic)
-      WIZARD_STATE[pack]="hermes"; set_pack_defaults
-      WIZARD_STATE[provider]="anthropic-api"; WIZARD_STATE[providerKey]="sk-ant-test-key"
+      wizard_state_set pack "hermes"; set_pack_defaults
+      wizard_state_set_many provider "anthropic-api" providerKey "sk-ant-test-key"
       ;;
     7|hermes-openrouter)
-      WIZARD_STATE[pack]="hermes"; set_pack_defaults
-      WIZARD_STATE[provider]="openrouter"; WIZARD_STATE[providerKey]="openrouter-test-key-12345"
+      wizard_state_set pack "hermes"; set_pack_defaults
+      wizard_state_set_many provider "openrouter" providerKey "openrouter-test-key-12345"
       ;;
     8|claude-code-bedrock)
-      WIZARD_STATE[pack]="claude-code"; set_pack_defaults
+      wizard_state_set pack "claude-code"; set_pack_defaults
       ;;
     9|claude-code-anthropic)
-      WIZARD_STATE[pack]="claude-code"; set_pack_defaults
-      WIZARD_STATE[provider]="anthropic-api"; WIZARD_STATE[providerKey]="sk-ant-test-key"
+      wizard_state_set pack "claude-code"; set_pack_defaults
+      wizard_state_set_many provider "anthropic-api" providerKey "sk-ant-test-key"
       ;;
     10|pi-openrouter)
-      WIZARD_STATE[pack]="pi"; set_pack_defaults
-      WIZARD_STATE[provider]="openrouter"; WIZARD_STATE[providerKey]="openrouter-test-key-12345"
+      wizard_state_set pack "pi"; set_pack_defaults
+      wizard_state_set_many provider "openrouter" providerKey "openrouter-test-key-12345"
       ;;
     11|hermes-bedrock)
-      WIZARD_STATE[pack]="hermes"; set_pack_defaults
+      wizard_state_set pack "hermes"; set_pack_defaults
       ;;
     12|hermes-openai)
-      WIZARD_STATE[pack]="hermes"; set_pack_defaults
-      WIZARD_STATE[provider]="openai-api"; WIZARD_STATE[providerKey]="sk-test-key"
+      wizard_state_set pack "hermes"; set_pack_defaults
+      wizard_state_set_many provider "openai-api" providerKey "sk-test-key"
       ;;
     13|pi-bedrock)
-      WIZARD_STATE[pack]="pi"; set_pack_defaults
+      wizard_state_set pack "pi"; set_pack_defaults
       ;;
     14|pi-litellm)
-      WIZARD_STATE[pack]="pi"; set_pack_defaults
-      WIZARD_STATE[provider]="litellm"; WIZARD_STATE[providerBaseUrl]="https://litellm.example.com"
+      wizard_state_set pack "pi"; set_pack_defaults
+      wizard_state_set_many provider "litellm" providerBaseUrl "https://litellm.example.com"
       ;;
     15|ironclaw-bedrock)
-      WIZARD_STATE[pack]="ironclaw"; set_pack_defaults
+      wizard_state_set pack "ironclaw"; set_pack_defaults
       ;;
     16|nemoclaw-bedrock)
-      WIZARD_STATE[pack]="nemoclaw"; set_pack_defaults
-      WIZARD_STATE[profile]="personal_assistant"; apply_profile_defaults
+      wizard_state_set pack "nemoclaw"; set_pack_defaults
+      wizard_state_set profile "personal_assistant"; apply_profile_defaults
       ;;
     17|kiro-cli)
-      WIZARD_STATE[pack]="kiro-cli"; set_pack_defaults
-      WIZARD_STATE[provider]="own-cloud"; WIZARD_STATE[providerAuthType]=""; WIZARD_STATE[providerRegion]=""
+      wizard_state_set pack "kiro-cli"; set_pack_defaults
+      wizard_state_set_many provider "own-cloud" providerAuthType "" providerRegion ""
       ;;
     18|advanced-model-override)
-      WIZARD_STATE[installMode]="advanced"
-      WIZARD_STATE[primaryModelOverride]="global.anthropic.claude-opus-4-6-v1"
+      wizard_state_set installMode "advanced"
+      wizard_state_set primaryModelOverride "global.anthropic.claude-opus-4-6-v1"
       ;;
     19|minimal)
       ;;
@@ -1381,21 +1420,22 @@ apply_scenario() {
       ;;
   esac
 
-  if [[ "${WIZARD_STATE[provider]}" != "own-cloud" ]]; then
+  if [[ "$(wizard_state_get provider)" != "own-cloud" ]]; then
     set_provider_defaults
   fi
-  case "${WIZARD_STATE[provider]}" in
-    anthropic-api) [[ -n "${WIZARD_STATE[providerKey]}" ]] || WIZARD_STATE[providerKey]="sk-ant-test-key" ;;
-    openai-api) [[ -n "${WIZARD_STATE[providerKey]}" ]] || WIZARD_STATE[providerKey]="sk-test-key" ;;
-    openrouter) [[ -n "${WIZARD_STATE[providerKey]}" ]] || WIZARD_STATE[providerKey]="openrouter-test-key-12345" ;;
-    litellm) [[ -n "${WIZARD_STATE[providerBaseUrl]}" ]] || WIZARD_STATE[providerBaseUrl]="https://litellm.example.com" ;;
+  case "$(wizard_state_get provider)" in
+    anthropic-api) [[ -n "$(wizard_state_get providerKey)" ]] || wizard_state_set providerKey "sk-ant-test-key" ;;
+    openai-api) [[ -n "$(wizard_state_get providerKey)" ]] || wizard_state_set providerKey "sk-test-key" ;;
+    openrouter) [[ -n "$(wizard_state_get providerKey)" ]] || wizard_state_set providerKey "openrouter-test-key-12345" ;;
+    litellm) [[ -n "$(wizard_state_get providerBaseUrl)" ]] || wizard_state_set providerBaseUrl "https://litellm.example.com" ;;
   esac
-  WIZARD_STATE[environmentName]="${WIZARD_STATE[pack]}"
-  WIZARD_STATE[lokiWatermark]="${WIZARD_STATE[environmentName]}"
-  WIZARD_STATE[deployMethod]="cfn-cli"
-  WIZARD_STATE[generatedCfnParams]="$(build_cfn_params WIZARD_STATE | jq -c .)"
-  WIZARD_STATE[generatedTerraformVars]="$(build_terraform_vars WIZARD_STATE | jq -c .)"
-  WIZARD_STATE[generatedBootstrapCommand]="$(build_bootstrap_command WIZARD_STATE | tr -d '\n')"
+  wizard_state_set_many \
+    environmentName "$(wizard_state_get pack)" \
+    lokiWatermark "$(wizard_state_get pack)" \
+    deployMethod "cfn-cli" \
+    generatedCfnParams "$(build_cfn_params | jq -c .)" \
+    generatedTerraformVars "$(build_terraform_vars | jq -c .)" \
+    generatedBootstrapCommand "$(build_bootstrap_command | tr -d '\n')"
 }
 
 main_flow() {
@@ -1424,7 +1464,7 @@ main_flow() {
         ;;
       provider_config)
         configure_provider || { step="provider"; continue; }
-        if [[ "${WIZARD_STATE[installMode]}" == "advanced" ]]; then
+        if [[ "$(wizard_state_get installMode)" == "advanced" ]]; then
           step="advanced_model"
         else
           step="simple_vpc"
@@ -1460,7 +1500,7 @@ main_flow() {
         case "${rc}" in
           0) step="deploy" ;;
           1)
-            if [[ "${WIZARD_STATE[installMode]}" == "advanced" ]]; then
+            if [[ "$(wizard_state_get installMode)" == "advanced" ]]; then
               step="advanced_security"
             else
               step="provider_config"
@@ -1496,9 +1536,9 @@ main() {
   set_pack_defaults
   set_provider_defaults
   apply_profile_defaults
-  [[ -n "${CLI_ENV_NAME}" ]] && WIZARD_STATE[environmentName]="${CLI_ENV_NAME}"
-  [[ -n "${CLI_EXISTING_VPC_ID}" ]] && { WIZARD_STATE[vpcMode]="existing"; WIZARD_STATE[existingVpcId]="${CLI_EXISTING_VPC_ID}"; }
-  [[ -n "${CLI_EXISTING_SUBNET_ID}" ]] && WIZARD_STATE[existingSubnetId]="${CLI_EXISTING_SUBNET_ID}"
+  [[ -n "${CLI_ENV_NAME}" ]] && wizard_state_set environmentName "${CLI_ENV_NAME}"
+  [[ -n "${CLI_EXISTING_VPC_ID}" ]] && { wizard_state_set vpcMode "existing"; wizard_state_set existingVpcId "${CLI_EXISTING_VPC_ID}"; }
+  [[ -n "${CLI_EXISTING_SUBNET_ID}" ]] && wizard_state_set existingSubnetId "${CLI_EXISTING_SUBNET_ID}"
 
   if [[ -n "${SCENARIO}" ]]; then
     DRY_RUN=true
@@ -1509,13 +1549,17 @@ main() {
 
   # Fast path: non-interactive without scenario — skip TUI, go straight to deploy
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
-    WIZARD_STATE[environmentName]="${WIZARD_STATE[environmentName]:-${WIZARD_STATE[pack]}}"
-    WIZARD_STATE[lokiWatermark]="${WIZARD_STATE[environmentName]}"
-    WIZARD_STATE[deployMethod]="cfn-cli"
+    local env_name
+    env_name="$(wizard_state_get environmentName)"
+    [[ -z "${env_name}" ]] && env_name="$(wizard_state_get pack)"
+    wizard_state_set environmentName "${env_name}"
+    wizard_state_set lokiWatermark "$(wizard_state_get environmentName)"
+    wizard_state_set deployMethod "cfn-cli"
     simple_vpc_mode
-    WIZARD_STATE[generatedCfnParams]="$(build_cfn_params WIZARD_STATE | jq -c .)"
-    WIZARD_STATE[generatedTerraformVars]="$(build_terraform_vars WIZARD_STATE | jq -c .)"
-    WIZARD_STATE[generatedBootstrapCommand]="$(build_bootstrap_command WIZARD_STATE | tr -d '\n')"
+    wizard_state_set_many \
+      generatedCfnParams "$(build_cfn_params | jq -c .)" \
+      generatedTerraformVars "$(build_terraform_vars | jq -c .)" \
+      generatedBootstrapCommand "$(build_bootstrap_command | tr -d '\n')"
     deploy_screen
     return 0
   fi
