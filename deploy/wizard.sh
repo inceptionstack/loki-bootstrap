@@ -50,8 +50,201 @@ die() {
   exit 1
 }
 
+CFN_COLOR_GREEN=$'\033[0;32m'
+CFN_COLOR_BLUE=$'\033[0;34m'
+CFN_COLOR_RED=$'\033[0;31m'
+CFN_COLOR_DIM=$'\033[2m'
+CFN_COLOR_RESET=$'\033[0m'
+
 require_tool() {
   command -v "$1" >/dev/null 2>&1 || die "$1 is required"
+}
+
+format_elapsed() {
+  local total="$1"
+  local hours=$(( total / 3600 ))
+  local mins=$(( (total % 3600) / 60 ))
+  local secs=$(( total % 60 ))
+
+  if (( hours > 0 )); then
+    printf '%02d:%02d:%02d' "${hours}" "${mins}" "${secs}"
+  else
+    printf '%02d:%02d' "${mins}" "${secs}"
+  fi
+}
+
+format_wizard_cfn_cli_params() {
+  local json="$1"
+  python3 - <<'PY' "${json}"
+import json
+import sys
+
+data = json.loads(sys.argv[1] or "{}")
+for key, value in data.items():
+    if isinstance(value, bool):
+        value = "true" if value else "false"
+    elif value is None:
+        value = ""
+    else:
+        value = str(value)
+    sys.stdout.write(f"ParameterKey={key},ParameterValue={value}\0")
+PY
+}
+
+resolve_cfn_template_arg() {
+  local template_path="$1"
+  local stack_name="$2"
+  local region="$3"
+  local size_bytes bucket_name account_id create_bucket_args=()
+
+  size_bytes="$(wc -c < "${template_path}" | tr -d '[:space:]')"
+  if (( size_bytes <= 51200 )); then
+    printf -- '--template-body\0file://%s\0' "${template_path}"
+    return 0
+  fi
+
+  account_id="$(aws sts get-caller-identity --query Account --output text)"
+  bucket_name="${stack_name}-cfn-templates-${account_id}"
+
+  if ! aws s3api head-bucket --bucket "${bucket_name}" >/dev/null 2>&1; then
+    if [[ "${region}" != "us-east-1" ]]; then
+      create_bucket_args=(--create-bucket-configuration "LocationConstraint=${region}")
+    fi
+    aws s3api create-bucket --bucket "${bucket_name}" --region "${region}" "${create_bucket_args[@]}" >/dev/null
+  fi
+
+  aws s3 cp "${template_path}" "s3://${bucket_name}/template.yaml" --region "${region}" >/dev/null
+
+  printf -- '--template-url\0%s\0' "$(aws s3 presign "s3://${bucket_name}/template.yaml" --region "${region}" --expires-in 3600)"
+}
+
+print_cfn_stack_outputs() {
+  local stack_name="$1"
+  local region="$2"
+  local outputs_json instance_id public_ip
+
+  outputs_json="$(aws cloudformation describe-stacks \
+    --stack-name "${stack_name}" \
+    --region "${region}" \
+    --query 'Stacks[0].Outputs' \
+    --output json)"
+
+  instance_id="$(python3 - <<'PY' "${outputs_json}"
+import json
+import sys
+
+outputs = json.loads(sys.argv[1] or "[]")
+for item in outputs:
+    if item.get("OutputKey") == "InstanceId":
+        print(item.get("OutputValue", ""))
+        break
+PY
+)"
+  public_ip="$(python3 - <<'PY' "${outputs_json}"
+import json
+import sys
+
+outputs = json.loads(sys.argv[1] or "[]")
+for item in outputs:
+    if item.get("OutputKey") == "PublicIp":
+        print(item.get("OutputValue", ""))
+        break
+PY
+)"
+
+  [[ -n "${instance_id}" ]] && echo "Instance ID: ${instance_id}"
+  [[ -n "${public_ip}" ]] && echo "Public IP: ${public_ip}"
+}
+
+wait_for_cfn_stack() {
+  local stack_name="$1"
+  local region="$2"
+  local start_time=$SECONDS
+  local max_wait=1800
+  local seen_file status_out stack_status
+  seen_file="$(mktemp)"
+
+  while true; do
+    local elapsed=$(( SECONDS - start_time ))
+    if (( elapsed >= max_wait )); then
+      rm -f "${seen_file}"
+      echo "Timed out after 30 minutes. Check the CloudFormation console for stack status."
+      exit 1
+    fi
+
+    local events_json
+    events_json="$(aws cloudformation describe-stack-events \
+      --stack-name "${stack_name}" \
+      --region "${region}" \
+      --query 'StackEvents[0:50].[EventId,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+      --output json 2>/dev/null || echo '[]')"
+
+    python3 - <<'PY' "${events_json}" "${seen_file}" "${CFN_COLOR_GREEN}" "${CFN_COLOR_BLUE}" "${CFN_COLOR_RED}" "${CFN_COLOR_DIM}" "${CFN_COLOR_RESET}"
+import json
+import pathlib
+import sys
+
+events = json.loads(sys.argv[1] or "[]")
+seen_path = pathlib.Path(sys.argv[2])
+green, blue, red, dim, reset = sys.argv[3:8]
+
+seen = set()
+if seen_path.exists():
+    seen = {line.strip() for line in seen_path.read_text().splitlines() if line.strip()}
+
+new_ids = []
+for event in reversed(events):
+    event_id, resource, status, reason = event
+    if not event_id or event_id in seen:
+        continue
+    new_ids.append(event_id)
+    resource = resource or ""
+    status = status or ""
+    reason = reason or ""
+    if "FAILED" in status or "ROLLBACK" in status:
+        print(f"  {red}x{reset} {resource} {status}")
+        if reason:
+            print(f"    {red}{reason}{reset}")
+    elif status.endswith("COMPLETE"):
+        print(f"  {green}o{reset} {resource} {dim}{status}{reset}")
+    elif status.endswith("IN_PROGRESS"):
+        print(f"  {blue}+{reset} {resource} {dim}{status}{reset}")
+
+if new_ids:
+    with seen_path.open("a", encoding="utf-8") as fh:
+        for event_id in new_ids:
+            fh.write(event_id + "\n")
+PY
+
+    if ! status_out="$(aws cloudformation describe-stacks \
+      --stack-name "${stack_name}" \
+      --region "${region}" \
+      --query 'Stacks[0].StackStatus' \
+      --output text 2>&1)"; then
+      rm -f "${seen_file}"
+      echo "Stack no longer exists or is inaccessible: ${status_out}" >&2
+      exit 1
+    fi
+    stack_status="${status_out}"
+
+    case "${stack_status}" in
+      CREATE_COMPLETE)
+        echo
+        echo "Stack created (${stack_name}) in $(format_elapsed "${elapsed}")."
+        rm -f "${seen_file}"
+        print_cfn_stack_outputs "${stack_name}" "${region}"
+        return 0
+        ;;
+      *FAILED*|*ROLLBACK*)
+        echo
+        rm -f "${seen_file}"
+        echo "Stack failed: ${stack_status}" >&2
+        exit 1
+        ;;
+    esac
+
+    sleep 10
+  done
 }
 
 detect_platform() {
@@ -1036,7 +1229,7 @@ deploy_screen() {
     return 0
   fi
 
-  wizard_header "Deploy" "Executing the generated bootstrap command."
+  wizard_header "Deploy" "Executing the selected deployment flow."
   echo "${WIZARD_STATE[generatedBootstrapCommand]}"
   echo
   if [[ "${WIZARD_STATE[deployMethod]}" == "cfn-console" ]]; then
@@ -1047,6 +1240,34 @@ deploy_screen() {
   if [[ "${WIZARD_STATE[deployMethod]}" == "terraform" ]]; then
     echo "Terraform variables:"
     jq . <<<"${WIZARD_STATE[generatedTerraformVars]}"
+    return 0
+  fi
+  if [[ "${WIZARD_STATE[deployMethod]}" == "cfn-cli" ]]; then
+    local stack_name region template_path stack_id
+    local -a cfn_params template_arg create_stack_args
+
+    stack_name="${WIZARD_STATE[environmentName]}"
+    region="${WIZARD_STATE[providerRegion]:-us-east-1}"
+    template_path="${REPO_ROOT}/deploy/cloudformation/template.yaml"
+
+    mapfile -d '' -t cfn_params < <(format_wizard_cfn_cli_params "${WIZARD_STATE[generatedCfnParams]}")
+    mapfile -d '' -t template_arg < <(resolve_cfn_template_arg "${template_path}" "${stack_name}" "${region}")
+
+    create_stack_args=(
+      cloudformation create-stack
+      --stack-name "${stack_name}"
+      "${template_arg[@]}"
+      --region "${region}"
+      --capabilities CAPABILITY_NAMED_IAM
+      --parameters
+      "${cfn_params[@]}"
+      --output text
+      --query StackId
+    )
+
+    stack_id="$(aws "${create_stack_args[@]}")"
+    echo "Stack creating: ${stack_id}"
+    wait_for_cfn_stack "${stack_name}" "${region}"
     return 0
   fi
 
