@@ -7,11 +7,20 @@ fi
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
 REPO_URL="https://github.com/inceptionstack/loki-agent.git"
 WIZARD_BRANCH="${WIZARD_BRANCH:-feat/provider-packs}"
+
+# When piped (curl | bash), BASH_SOURCE is empty — auto-clone immediately
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" == "bash" ]]; then
+  CLONE_DIR="/tmp/loki-agent-wizard-$$"
+  echo "Downloading loki-agent (branch: ${WIZARD_BRANCH})..."
+  rm -rf "${CLONE_DIR}" 2>/dev/null || true
+  git clone --depth 1 -b "${WIZARD_BRANCH}" "${REPO_URL}" "${CLONE_DIR}" 2>&1 | tail -1
+  exec bash "${CLONE_DIR}/deploy/wizard.sh" "$@"
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Auto-clone repo if running as a standalone downloaded script (lib files missing)
 if [[ ! -f "${SCRIPT_DIR}/lib/wizard-ui.sh" ]]; then
