@@ -29,6 +29,9 @@ GUM="${GUM:-}"
 DRY_RUN=false
 NON_INTERACTIVE=false
 SCENARIO=""
+CLI_ENV_NAME=""
+CLI_EXISTING_VPC_ID=""
+CLI_EXISTING_SUBNET_ID=""
 
 cleanup_on_interrupt() {
   printf '\n'
@@ -69,7 +72,7 @@ detect_platform() {
 ensure_gum() {
   local version current os arch url tmpdir
   if command -v gum >/dev/null 2>&1; then
-    current="$(gum --version 2>/dev/null | sed 's/^v//')"
+    current="$(gum --version 2>/dev/null | awk '{print $3}' | sed 's/^v//')"
     if [[ "${current}" == "${GUM_VERSION_REQUIRED}" ]]; then
       GUM="gum"
       return 0
@@ -78,7 +81,7 @@ ensure_gum() {
 
   tmpdir="/tmp/loki-gum-${GUM_VERSION_REQUIRED}"
   if [[ -x "${tmpdir}/gum" ]]; then
-    current="$("${tmpdir}/gum" --version 2>/dev/null | sed 's/^v//')"
+    current="$("${tmpdir}/gum" --version 2>/dev/null | awk '{print $3}' | sed 's/^v//')"
     if [[ "${current}" == "${GUM_VERSION_REQUIRED}" ]]; then
       GUM="${tmpdir}/gum"
       return 0
@@ -91,9 +94,9 @@ ensure_gum() {
   url="https://github.com/charmbracelet/gum/releases/download/v${GUM_VERSION_REQUIRED}/gum_${GUM_VERSION_REQUIRED}_${os}_${arch}.tar.gz"
   mkdir -p "${tmpdir}"
   echo "Installing gum v${GUM_VERSION_REQUIRED}..."
-  curl -fsSL "${url}" | tar -xz -C "${tmpdir}"
+  curl -fsSL "${url}" | tar -xz -C "${tmpdir}" --strip-components=1
   chmod +x "${tmpdir}/gum"
-  version="$("${tmpdir}/gum" --version 2>/dev/null | sed 's/^v//')"
+  version="$("${tmpdir}/gum" --version 2>/dev/null | awk '{print $3}' | sed 's/^v//')"
   [[ "${version}" == "${GUM_VERSION_REQUIRED}" ]] || die "Failed to install gum v${GUM_VERSION_REQUIRED}"
   GUM="${tmpdir}/gum"
 }
@@ -108,14 +111,32 @@ parse_args() {
         SCENARIO="$2"
         shift 2
         ;;
+      --env-name)
+        [[ $# -gt 1 ]] || die "--env-name requires a value"
+        CLI_ENV_NAME="$2"
+        shift 2
+        ;;
+      --existing-vpc-id)
+        [[ $# -gt 1 ]] || die "--existing-vpc-id requires a value"
+        CLI_EXISTING_VPC_ID="$2"
+        shift 2
+        ;;
+      --existing-subnet-id)
+        [[ $# -gt 1 ]] || die "--existing-subnet-id requires a value"
+        CLI_EXISTING_SUBNET_ID="$2"
+        shift 2
+        ;;
       --help|-h)
         cat <<EOF
 Usage: deploy/wizard.sh [OPTIONS]
 
 Options:
-  --dry-run               Print final state and generated commands without deploying
-  --non-interactive, -y   Accept default selections
-  --scenario <name>       Apply a canned dry-run scenario
+  --dry-run                   Print final state and generated commands without deploying
+  --non-interactive, -y       Accept default selections
+  --scenario <name>           Apply a canned dry-run scenario
+  --env-name <name>           Set environment name
+  --existing-vpc-id <id>      Set existing VPC ID and use existing VPC mode
+  --existing-subnet-id <id>   Set existing subnet ID
 EOF
         exit 0
         ;;
@@ -1048,6 +1069,9 @@ main() {
   set_pack_defaults
   set_provider_defaults
   apply_profile_defaults
+  [[ -n "${CLI_ENV_NAME}" ]] && WIZARD_STATE[environmentName]="${CLI_ENV_NAME}"
+  [[ -n "${CLI_EXISTING_VPC_ID}" ]] && { WIZARD_STATE[vpcMode]="existing"; WIZARD_STATE[existingVpcId]="${CLI_EXISTING_VPC_ID}"; }
+  [[ -n "${CLI_EXISTING_SUBNET_ID}" ]] && WIZARD_STATE[existingSubnetId]="${CLI_EXISTING_SUBNET_ID}"
 
   if [[ -n "${SCENARIO}" ]]; then
     DRY_RUN=true
