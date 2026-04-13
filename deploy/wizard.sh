@@ -619,6 +619,32 @@ advanced_instance() {
   done
 }
 
+simple_vpc_mode() {
+  wizard_ui_set_step 5 7
+  local choice
+  choice="$(wizard_choose "VPC Mode" "Deploy into a new VPC or reuse an existing one?" "${WIZARD_STATE[vpcMode]}" new existing BACK)"
+  case "${choice}" in
+    BACK) return 1 ;;
+    new)
+      WIZARD_STATE[vpcMode]="new"
+      WIZARD_STATE[existingVpcId]=""
+      WIZARD_STATE[existingSubnetId]=""
+      ;;
+    existing)
+      WIZARD_STATE[vpcMode]="existing"
+      local vpc_id subnet_id
+      vpc_id="$(wizard_input "Existing VPC ID" "Enter the VPC ID to deploy into." "${WIZARD_STATE[existingVpcId]}" "vpc-..." false)" || { return 1; }
+      subnet_id="$(wizard_input "Existing Subnet ID" "Enter a public subnet ID in the VPC." "${WIZARD_STATE[existingSubnetId]}" "subnet-..." false)" || { return 1; }
+      [[ -n "${vpc_id}" && -n "${subnet_id}" ]] || {
+        wizard_error "Existing VPC mode requires both VPC ID and subnet ID."
+        return 1
+      }
+      WIZARD_STATE[existingVpcId]="${vpc_id}"
+      WIZARD_STATE[existingSubnetId]="${subnet_id}"
+      ;;
+  esac
+}
+
 advanced_networking() {
   wizard_ui_set_step 8 12
   local action value
@@ -1004,7 +1030,7 @@ main_flow() {
         if [[ "${WIZARD_STATE[installMode]}" == "advanced" ]]; then
           step="advanced_model"
         else
-          step="review"
+          step="simple_vpc"
         fi
         ;;
       advanced_model)
@@ -1025,6 +1051,10 @@ main_flow() {
         ;;
       advanced_security)
         advanced_security_services || { step="advanced_deploy"; continue; }
+        step="review"
+        ;;
+      simple_vpc)
+        simple_vpc_mode || { step="provider_config"; continue; }
         step="review"
         ;;
       review)
