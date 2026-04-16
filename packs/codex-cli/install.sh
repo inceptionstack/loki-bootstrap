@@ -3,8 +3,7 @@
 #
 # Usage:
 #   ./install.sh [--region us-east-1] [--model gpt-5.4] \
-#                [--openai-api-key sk-...] [--approval-policy never] \
-#                [--sandbox-mode danger-full-access]
+#                [--openai-api-key sk-...] [--sandbox workspace-write]
 #
 # Assumes:
 #   - Node.js / npm available
@@ -26,8 +25,7 @@ source "${SCRIPT_DIR}/../common.sh"
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
 PACK_ARG_MODEL="$(pack_config_get model "gpt-5.4")"
 PACK_ARG_OPENAI_API_KEY="$(pack_config_get "openai-api-key" "${OPENAI_API_KEY:-}")"
-PACK_ARG_APPROVAL_POLICY="$(pack_config_get "approval-policy" "never")"
-PACK_ARG_SANDBOX_MODE="$(pack_config_get "sandbox-mode" "danger-full-access")"
+PACK_ARG_SANDBOX="$(pack_config_get "sandbox" "workspace-write")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 usage() {
@@ -44,9 +42,7 @@ Options:
   --region            AWS region (informational only)             (default: us-east-1)
   --model             Default model for Codex CLI                 (default: gpt-5.4)
   --openai-api-key    OpenAI API key (required — sk-...)
-  --approval-policy   Approval mode: on-request|untrusted|never   (default: never)
-  --sandbox-mode      Sandbox: workspace-write|workspace-read|danger-full-access
-                                                                  (default: danger-full-access)
+  --sandbox           Sandbox: workspace-write|workspace-read     (default: workspace-write)
   --help              Show this help message
 
 Note: Codex CLI is a CLI tool only — no systemd service is created.
@@ -54,8 +50,7 @@ Note: Codex CLI is a CLI tool only — no systemd service is created.
 
 Examples:
   ./install.sh --openai-api-key sk-proj-abc123
-  ./install.sh --model gpt-5.4 --approval-policy on-request
-  ./install.sh --openai-api-key sk-proj-abc123 --sandbox-mode workspace-write
+  ./install.sh --model gpt-5.4 --sandbox workspace-write
 EOF
 }
 
@@ -66,8 +61,7 @@ while [[ $# -gt 0 ]]; do
     --region)             PACK_ARG_REGION="$2";           shift 2 ;;
     --model)              PACK_ARG_MODEL="$2";            shift 2 ;;
     --openai-api-key)     PACK_ARG_OPENAI_API_KEY="$2";   shift 2 ;;
-    --approval-policy)    PACK_ARG_APPROVAL_POLICY="$2";  shift 2 ;;
-    --sandbox-mode)       PACK_ARG_SANDBOX_MODE="$2";     shift 2 ;;
+    --sandbox)            PACK_ARG_SANDBOX="$2";          shift 2 ;;
     *) [[ $# -gt 1 ]] && [[ "$2" != --* ]] && shift 2 || shift ;;
   esac
 done
@@ -75,11 +69,10 @@ done
 REGION="${PACK_ARG_REGION}"
 MODEL="${PACK_ARG_MODEL}"
 OPENAI_API_KEY="${PACK_ARG_OPENAI_API_KEY}"
-APPROVAL_POLICY="${PACK_ARG_APPROVAL_POLICY}"
-SANDBOX_MODE="${PACK_ARG_SANDBOX_MODE}"
+SANDBOX="${PACK_ARG_SANDBOX}"
 
 pack_banner "codex-cli"
-log "region=${REGION} model=${MODEL} approval_policy=${APPROVAL_POLICY} sandbox_mode=${SANDBOX_MODE}"
+log "region=${REGION} model=${MODEL} sandbox=${SANDBOX}"
 
 # ── Prompt for API key if not provided ────────────────────────────────────────
 if [[ -z "${OPENAI_API_KEY}" ]]; then
@@ -88,10 +81,19 @@ if [[ -z "${OPENAI_API_KEY}" ]]; then
   printf "${_CLR_YELLOW}  OpenAI API Key Required${_CLR_NC}\n"
   printf "${_CLR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n"
   printf "\n"
-  printf "  Codex CLI connects directly to OpenAI\x27s API (not AWS Bedrock).\n"
+  printf "  Codex CLI connects directly to OpenAI's API (not AWS Bedrock).\n"
   printf "  Get your API key at: ${_CLR_CYAN}https://platform.openai.com/api-keys${_CLR_NC}\n"
   printf "\n"
-  printf "  You can also skip this and run dex
+  printf "  You can also skip this and run 'codex login' later.\n"
+  printf "\n"
+
+  if [[ -t 0 ]]; then
+    read -rp "  Enter OpenAI API key (or press Enter to skip): " OPENAI_API_KEY
+    printf "\n"
+  else
+    warn "Non-interactive — no API key provided. Run 'codex login' after install."
+  fi
+fi
 
 # Validate key format if provided
 if [[ -n "${OPENAI_API_KEY}" ]] && [[ ! "${OPENAI_API_KEY}" =~ ^sk- ]]; then
@@ -128,16 +130,13 @@ step "Writing Codex CLI configuration"
 CODEX_HOME="${HOME}/.codex"
 mkdir -p "${CODEX_HOME}"
 
+# Codex CLI config.toml — only 'model' is a valid top-level config key.
+# Sandbox and approval modes are CLI args (--sandbox, -a), not config keys.
 cat > "${CODEX_HOME}/config.toml" << TOML
 # Codex CLI configuration
-# Managed by loki-agent packs/codex-cli/install.sh
+# Managed by lowkey packs/codex-cli/install.sh
 
 model = "${MODEL}"
-approval_policy = "${APPROVAL_POLICY}"
-sandbox_mode = "${SANDBOX_MODE}"
-
-# Store credentials in file (no keyring on EC2)
-cli_auth_credentials_store = "file"
 TOML
 
 chmod 600 "${CODEX_HOME}/config.toml"
@@ -152,8 +151,8 @@ if [[ -n "${OPENAI_API_KEY}" ]]; then
 
   cat > "${CODEX_ENV}" << EOF
 # Codex CLI — authentication
-# Managed by loki-agent packs/codex-cli/install.sh
-# ⚠️  Contains secret — do not share or commit
+# Managed by lowkey packs/codex-cli/install.sh
+# Contains secret — do not share or commit
 export OPENAI_API_KEY="${OPENAI_API_KEY}"
 EOF
 
@@ -163,7 +162,6 @@ EOF
   if ! grep -q '.codex/env.sh' "${HOME}/.bashrc" 2>/dev/null; then
     printf '\n[ -f "%s/.codex/env.sh" ] && source "%s/.codex/env.sh"\n' "${HOME}" "${HOME}" >> "${HOME}/.bashrc"
   fi
-
 
   # Source for current session
   export OPENAI_API_KEY="${OPENAI_API_KEY}"
@@ -177,8 +175,7 @@ step "Sanity check"
 
 ok "codex --version: $(codex --version 2>/dev/null || echo unknown)"
 ok "Model: ${MODEL}"
-ok "Approval policy: ${APPROVAL_POLICY}"
-ok "Sandbox mode: ${SANDBOX_MODE}"
+ok "Default sandbox: ${SANDBOX} (use: codex exec --sandbox ${SANDBOX})"
 
 if [[ -n "${OPENAI_API_KEY}" ]]; then
   ok "Auth: API key configured"
@@ -197,7 +194,7 @@ cat << 'NOTICE'
     codex                     # Start interactive TUI
     codex exec "Your prompt"  # One-shot execution
     codex exec --full-auto "Your prompt"  # Auto-approve in sandbox
-    /model                    # Switch models (inside TUI)
+    codex exec --sandbox workspace-write "Your prompt"
 
   Auth alternatives:
     codex login               # Browser-based ChatGPT login

@@ -24,12 +24,9 @@ params:
   - name: openai-api-key
     description: "OpenAI API key (required — get from platform.openai.com/api-keys)"
     required: true
-  - name: approval-policy
-    description: "Approval mode: on-request, untrusted, or never"
-    default: "never"
-  - name: sandbox-mode
-    description: "Sandbox level: workspace-write, workspace-read, or danger-full-access"
-    default: "danger-full-access"
+  - name: sandbox
+    description: "Default sandbox mode: workspace-write or workspace-read"
+    default: "workspace-write"
 
 health_check:
   command: "codex --version"
