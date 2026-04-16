@@ -106,8 +106,10 @@ CODEX_HOME="${HOME}/.codex"
 CODEX_CONFIG="${CODEX_HOME}/config.toml"
 mkdir -p "${CODEX_HOME}"
 
-# Merge our keys into existing config.toml using python tomllib/tomli_w if
-# available; otherwise write only the managed block idempotently with sentinels.
+# Merge strategy: sentinel-delimited managed block (regex-based text rewrite).
+# Preserves user edits outside the managed block. Putting the managed block at
+# the TOP of the file keeps our bare keys at the top-level TOML scope so they
+# aren't accidentally nested into a user-defined [table] section.
 PACK_MODEL="${MODEL}" python3 - "${CODEX_CONFIG}" <<'PYEOF'
 import os, sys, re
 path = sys.argv[1]
@@ -181,22 +183,31 @@ ok "Approval: never (no command prompts)"
 warn "Auth: NOT configured — run 'codex login' or set OPENAI_API_KEY"
 
 # ── Post-install notice ──────────────────────────────────────────────────────
-cat << 'NOTICE'
+cat << NOTICE
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   [CODEX CLI] INSTALLED — BUILDER AGENT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Authenticate (choose one):
-    codex login                           # Browser ChatGPT login (opens URL)
-    printenv OPENAI_API_KEY | codex login --with-api-key
+  !! AUTHENTICATION REQUIRED !!
+  Codex CLI is installed but NOT authenticated. You must authenticate
+  interactively on this machine before first use. Choose one:
 
-  Usage:
+    codex login                          # Browser/ChatGPT login
+    codex login --with-api-key           # Paste API key on stdin
+    export OPENAI_API_KEY=sk-...         # Or set env var (use Secrets Manager)
+
+  NOTE: Headless (SSM / SSH-only) auth flow will be added in a follow-up.
+        For now: SSM into the instance and run one of the commands above.
+
+  Usage after auth:
     codex                                 # Start interactive TUI
     codex exec "Your prompt"              # One-shot execution
     codex resume --last                   # Resume last session
 
-  Config written to: ~/.codex/config.toml (managed block, preserves user edits)
+  Config:  ~/.codex/config.toml (managed block preserves user edits)
+  Model:   ${MODEL}
+  Sandbox: danger-full-access (builder — full filesystem/network)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
