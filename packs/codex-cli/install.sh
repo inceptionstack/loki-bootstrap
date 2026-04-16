@@ -63,8 +63,12 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)   usage; exit 0 ;;
-    --region)    PACK_ARG_REGION="${2:?--region requires a value}"; shift 2 ;;
-    --model)     PACK_ARG_MODEL="${2:?--model requires a value}";  shift 2 ;;
+    --region)
+      [[ $# -ge 2 && "$2" != -* ]] || { echo "error: --region requires a value" >&2; exit 2; }
+      PACK_ARG_REGION="$2"; shift 2 ;;
+    --model)
+      [[ $# -ge 2 && "$2" != -* ]] || { echo "error: --model requires a value" >&2; exit 2; }
+      PACK_ARG_MODEL="$2"; shift 2 ;;
     --)          shift; break ;;
     -*)          echo "error: unknown option: $1" >&2; usage >&2; exit 2 ;;
     *)           echo "error: unexpected positional argument: $1" >&2; exit 2 ;;

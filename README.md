@@ -32,9 +32,10 @@
 > # Kiro CLI agent (AWS agentic IDE — requires interactive login after deploy)
 > curl -sfL install.lowkey.run | bash -s -- -y --pack kiro-cli --profile builder
 >
-> # Codex CLI agent (OpenAI — requires API key, no Bedrock)
+> # Codex CLI agent (OpenAI — builder agent, no Bedrock)
 > curl -sfL install.lowkey.run | bash -s -- -y --pack codex-cli
-> # After deploy, authenticate on the instance with: codex login
+> # After deploy, SSM into the instance and run: codex login
+> # (ChatGPT/browser OR API key — your choice)
 > ```
 >
 > Requires: AWS CLI + admin access on a **dedicated sandbox account**.
