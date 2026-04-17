@@ -66,9 +66,9 @@ description: "AWS's agentic IDE terminal client, with MCP servers and optional h
 | `region` | `--region` | `us-east-1` | AWS region (informational — Kiro uses its own cloud) |
 | `from-secret` | `--kiro-from-secret` | — | Secrets Manager id/arn whose `SecretString` is the Kiro API key |
 
-<Warning>
-There's a deprecated `--kiro-api-key KEY` flag still accepted for back-compat, but **don't use it** — passing secrets on argv leaks them to shell history and `/proc/<pid>/cmdline`. Always use `--kiro-from-secret`.
-</Warning>
+<Note>
+The top-level installer only supports `--kiro-from-secret` for headless auth. The pack-level script (`packs/kiro-cli/install.sh`) still accepts a legacy `--kiro-api-key` flag with a deprecation warning, but this is **not** threaded through the top-level installer, CFN, or Terraform. Always use `--kiro-from-secret`.
+</Note>
 
 ## Resource requirements
 

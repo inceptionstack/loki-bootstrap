@@ -1155,7 +1155,8 @@ pack_default_model() {
   case "$1" in
     codex-cli)                echo "gpt-5.4" ;;
     kiro-cli)                 echo "kiro-cloud" ;;  # Kiro uses its own inference; value is informational only
-    openclaw|claude-code)     echo "us.anthropic.claude-opus-4-6-v1" ;;
+    openclaw)                 echo "us.anthropic.claude-opus-4-6-v1" ;;
+    claude-code)              echo "us.anthropic.claude-sonnet-4-6" ;;
     nemoclaw)                 echo "us.anthropic.claude-opus-4-6-v1" ;;
     # hermes depends on bedrockify; 'model' is the Bedrock id bedrockify
     # proxies to (NOT the Hermes-specific model ID, which is a separate
