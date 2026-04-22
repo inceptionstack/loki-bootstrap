@@ -226,8 +226,15 @@ cycle() {
 
   if openclaw agent --session-id "$SESSION_ID" -m "$(cat "$prompt")" --deliver >> "$LOG_FILE" 2>&1; then
     log "Agent turn dispatched for $count review(s)"
-    for rh in "${receipts[@]}"; do
+    local now=$(date -u +%FT%TZ)
+    for ((i=0; i<count; i++)); do
+      local msg=$(echo "$resp" | jq -c ".Messages[$i]")
+      local rid=$(echo "$msg" | jq -r '.Body | fromjson | .review_id')
+      local rh=$(echo "$msg"  | jq -r '.ReceiptHandle')
       aws sqs delete-message --queue-url "$QUEUE_URL" --receipt-handle "$rh" --region "$REGION" --output text > /dev/null
+      # Record AFTER delete succeeds so a crash mid-flush re-plays at most one turn.
+      jq --arg id "$rid" --arg ts "$now" '. + {($id): $ts}' "$SEEN_FILE" \
+        > "${SEEN_FILE}.tmp" && mv "${SEEN_FILE}.tmp" "$SEEN_FILE"
     done
   else
     log "WARN: agent turn failed; messages redeliver after visibility timeout"
@@ -355,21 +362,25 @@ Effectively $0/month on a hobby account:
 - CloudWatch: one alarm, one Lambda log group.
 - Secrets Manager: 1 secret (~$0.40/month) — you probably already have one for your webhook.
 
-## Files
+## Suggested repo layout
+
+This doc is a reference — the actual artifacts don't ship in this repository. When you adopt the pipeline in your own repo, a clean layout is:
 
 ```
 bootstraps/optional/github-pr-review-poller/
-├── GITHUB-POLLER-BOOTSTRAP.md       # This file
+├── README.md                     # Short adoption guide
 ├── templates/
-│   └── pr-reviews.yml               # SQS + DLQ + alarm
+│   └── pr-reviews.yml            # SQS + DLQ + alarm CFN
 ├── lambda/
-│   └── github-webhook/index.mjs     # pull_request_review handler
+│   └── github-webhook/
+│       └── index.mjs             # pull_request_review handler
 └── daemons/
     └── pr-review-poller/
-        ├── pr-review-poller         # bash loop
-        ├── pr-review-poller.service # systemd user unit
-        └── README.md
+        ├── pr-review-poller      # bash loop above
+        └── pr-review-poller.service
 ```
+
+Nothing in this file depends on that layout — every code block above is standalone and copy-pasteable.
 
 ## Adapting to other channels
 
