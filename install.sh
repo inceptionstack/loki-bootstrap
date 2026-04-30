@@ -304,6 +304,10 @@ _telem_resolve_install_method() {
 # install.sh stores DEPLOY_METHOD as a numeric code (1=cfn-console, 2=cfn-cli,
 # 3=terraform) and PRESELECT_METHOD as the raw user input. Both need
 # normalization to the server catalog: cfn | terraform | manual | ec2-direct.
+#
+# Returns empty string when unresolved so callers can omit the prop
+# (server validator drops any value not matching the enum, which pollutes
+# dashboards with false "cfn" signals if we default).
 _telem_resolve_method() {
   local m="${DEPLOY_METHOD:-}"
   case "$m" in
@@ -317,7 +321,7 @@ _telem_resolve_method() {
     terraform|tf)        printf 'terraform\n' ;;
     manual)              printf 'manual\n' ;;
     ec2|ec2-direct)      printf 'ec2-direct\n' ;;
-    *)                   printf 'cfn\n' ;;
+    *)                   printf '\n' ;;  # unresolved — caller omits key
   esac
 }
 
@@ -354,20 +358,23 @@ _telem_event() {
 _telem_post() {
   # Usage: _telem_post "/v1/install" '{"json":"body"}'
   # Runs curl in the background. Never blocks. Never fails visibly.
+  # Logs HTTP status + ms latency to $_TELEM_LOG so drift can be diagnosed
+  # locally without breaking user-visible behavior.
   local path="${1:-}" body="${2:-}"
   [[ "$_TELEM_ENABLED" == "true" ]] || return 0
   command -v curl >/dev/null 2>&1 || return 0
   (
-    command curl -sfSL -X POST \
+    command curl -sSL -X POST \
       "${_TELEM_ENDPOINT}${path}" \
       -H "Content-Type: application/json" \
       --connect-timeout "$_TELEM_TIMEOUT" \
       --max-time "$_TELEM_TIMEOUT" \
       -d "$body" \
       -o /dev/null \
-      -w "" \
+      -w "telemetry ${path} http=%{http_code} time=%{time_total}s\n" \
       </dev/null \
-      2>>"$_TELEM_LOG" || true
+      2>>"$_TELEM_LOG" \
+      | tee -a "$_TELEM_LOG" >/dev/null || true
   ) >/dev/null 2>&1 &
   disown 2>/dev/null || true
   return 0
@@ -469,59 +476,152 @@ EOF
 }
 
 # ── Convenience: record common installer events ────────────────────────
+#
+# ⚠ IMPORTANT — only these 21 event names are in the server catalog
+# (see https://docs.lowkey.run/reference/telemetry-schema and the OpenAPI at
+# https://lowkey.run/api/telemetry-v1.openapi.yaml). Unknown event names and
+# unwhitelisted props are silently dropped server-side. We do NOT emit
+# install.started / install.completed / install.failed as catalog events —
+# those are captured by the /v1/install beacon outcome= field instead.
+#
+# Props are built via _telem_kv so keys with empty or invalid values are
+# omitted, rather than sending "unknown" strings that the server drops.
+
+# Build a single "k":"v" pair if value is non-empty; otherwise print nothing.
+# Quotes and special JSON chars are NOT escaped because installer values are
+# bounded (enums, regex-validated). Use only for controlled inputs.
+_telem_kv() {
+  local k="$1" v="$2"
+  [[ -n "$v" ]] || return 0
+  printf '"%s":"%s"' "$k" "$v"
+}
+
+_telem_kv_num() {
+  local k="$1" v="$2"
+  [[ -n "$v" ]] || return 0
+  # only emit if purely numeric
+  [[ "$v" =~ ^[0-9]+$ ]] || return 0
+  printf '"%s":%s' "$k" "$v"
+}
+
+# Join non-empty pairs with commas into a JSON object body.
+_telem_props() {
+  local body="" pair
+  for pair in "$@"; do
+    [[ -z "$pair" ]] && continue
+    [[ -z "$body" ]] && body="$pair" || body="$body,$pair"
+  done
+  printf '{%s}' "$body"
+}
+
+# Return $1 only if it matches AWS region pattern, else empty.
+_telem_aws_region() {
+  local v="${1:-}"
+  [[ "$v" =~ ^[a-z]{2}-[a-z]+-[0-9]{1,2}[a-z]?$ ]] && printf '%s' "$v"
+}
+
+# Return $1 only if it matches EC2 instance-id pattern, else empty.
+_telem_instance_id() {
+  local v="${1:-}"
+  [[ "$v" =~ ^i-[0-9a-f]{8,17}$ ]] && printf '%s' "$v"
+}
+
+# Return $1 only if it's a valid InstallPack enum value, else empty.
+_telem_pack() {
+  local v="${1:-}"
+  case "$v" in
+    builder|personal-assistant|account-assistant|essential|optional\
+    |personal_assistant|account_assistant|openclaw|claude-code|codex-cli\
+    |kiro-cli|nemoclaw|hermes|pi|ironclaw)
+      printf '%s' "$v" ;;
+  esac
+}
+
+_telem_profile() {
+  local v="${1:-}"
+  case "$v" in
+    builder|personal_assistant|account_assistant|personal-assistant|account-assistant)
+      printf '%s' "$v" ;;
+  esac
+}
+
+# Clamp to [0,3600000] (spec max for install.deploy_completed.duration_ms).
+_telem_clamp_duration_ms() {
+  local v="${1:-0}"
+  [[ "$v" =~ ^[0-9]+$ ]] || { printf '0'; return 0; }
+  (( v > 3600000 )) && v=3600000
+  printf '%s' "$v"
+}
+
+# Install started: beacon only, no catalog event (install.started is NOT in
+# the server catalog and would be silently dropped from /v1/ingest).
 _telem_install_started() {
   _telem_send_install_beacon "started"
-  _telem_event "install.started" "$(printf '{"method":"%s"}' \
-    "$(_telem_resolve_method)")"
 }
 
 _telem_pack_selected() {
-  _telem_event "install.pack_selected" "$(printf '{"pack":"%s","profile":"%s"}' \
-    "${PACK_NAME:-unknown}" "${PROFILE_NAME:-unknown}")"
+  local props
+  props="$(_telem_props \
+    "$(_telem_kv pack "$(_telem_pack "${PACK_NAME:-}")")" \
+    "$(_telem_kv profile "$(_telem_profile "${PROFILE_NAME:-}")")")"
+  _telem_event "install.pack_selected" "$props"
 }
 
 _telem_method_selected() {
-  _telem_event "install.method_selected" "$(printf '{"method":"%s","region":"%s"}' \
-    "$(_telem_resolve_method)" "${DEPLOY_REGION:-unknown}")"
+  local props
+  props="$(_telem_props \
+    "$(_telem_kv method "$(_telem_resolve_method)")" \
+    "$(_telem_kv region "$(_telem_aws_region "${DEPLOY_REGION:-}")")")"
+  _telem_event "install.method_selected" "$props"
 }
 
 _telem_deploy_started() {
-  _telem_event "install.deploy_started" "$(printf '{"method":"%s","region":"%s","pack":"%s"}' \
-    "$(_telem_resolve_method)" "${DEPLOY_REGION:-unknown}" "${PACK_NAME:-unknown}")"
+  local props
+  props="$(_telem_props \
+    "$(_telem_kv method "$(_telem_resolve_method)")" \
+    "$(_telem_kv region "$(_telem_aws_region "${DEPLOY_REGION:-}")")" \
+    "$(_telem_kv pack "$(_telem_pack "${PACK_NAME:-}")")")"
+  _telem_event "install.deploy_started" "$props"
 }
 
 _telem_deploy_completed() {
   local dur
-  dur="$(_telem_duration_ms)"
-  _telem_event "install.deploy_completed" "$(printf '{"duration_ms":%s,"method":"%s"}' \
-    "$dur" "$(_telem_resolve_method)")"
+  dur="$(_telem_clamp_duration_ms "$(_telem_duration_ms)")"
+  local props
+  props="$(_telem_props \
+    "$(_telem_kv method "$(_telem_resolve_method)")" \
+    "$(_telem_kv_num duration_ms "$dur")")"
+  _telem_event "install.deploy_completed" "$props"
 }
 
 _telem_bootstrap_completed() {
-  _telem_event "install.bootstrap_completed" "$(printf '{"instance_id":"%s"}' \
-    "${INSTANCE_ID:-unknown}")"
+  local props
+  props="$(_telem_props \
+    "$(_telem_kv instance_id "$(_telem_instance_id "${INSTANCE_ID:-}")")")"
+  _telem_event "install.bootstrap_completed" "$props"
 }
 
+# Install completed: beacon only (install.completed NOT in catalog — would be dropped).
 _telem_install_completed() {
   [[ -z "${_TELEM_FINAL_STATE:-}" ]] || return 0
   _TELEM_FINAL_STATE="completed"
   local dur
   dur="$(_telem_duration_ms)"
-  _telem_event "install.completed" "$(printf '{"duration_ms":%s,"pack":"%s","method":"%s","region":"%s"}' \
-    "$dur" "${PACK_NAME:-unknown}" "$(_telem_resolve_method)" "${DEPLOY_REGION:-unknown}")"
   _telem_send_install_beacon "completed" "$dur"
   _telem_flush
 }
 
+# Install failed: beacon only. failure_step is normalized to the spec's Ident
+# regex (^[A-Za-z][A-Za-z0-9_.:-]{0,63}$); anything that doesn't conform is
+# sanitized to "unknown_step".
 _telem_install_failed() {
   [[ -z "${_TELEM_FINAL_STATE:-}" ]] || return 0
   _TELEM_FINAL_STATE="failed"
   local exit_code="${1:-1}"
-  local failure_step="${2:-unknown}"
+  local failure_step="${2:-unknown_step}"
+  [[ "$failure_step" =~ ^[A-Za-z][A-Za-z0-9_.:-]{0,63}$ ]] || failure_step="unknown_step"
   local dur
   dur="$(_telem_duration_ms)"
-  _telem_event "install.failed" "$(printf '{"duration_ms":%s,"exit_code":%s,"step":"%s","pack":"%s","method":"%s"}' \
-    "$dur" "$exit_code" "$failure_step" "${PACK_NAME:-unknown}" "$(_telem_resolve_method)")"
   _telem_send_install_beacon "failed" "$dur" "$failure_step" "exit_${exit_code}"
   _telem_flush
 }
