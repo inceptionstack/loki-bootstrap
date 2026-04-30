@@ -517,7 +517,7 @@ _telem_props() {
 # Return $1 only if it matches AWS region pattern, else empty.
 _telem_aws_region() {
   local v="${1:-}"
-  [[ "$v" =~ ^[a-z]{2}-[a-z]+-[0-9]{1,2}[a-z]?$ ]] && printf '%s' "$v"
+  [[ "$v" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]{1,2}[a-z]?$ ]] && printf '%s' "$v"
 }
 
 # Return $1 only if it matches EC2 instance-id pattern, else empty.
