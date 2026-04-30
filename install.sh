@@ -299,6 +299,7 @@ _telem_resolve_install_method() {
     printf 'github-actions\n'; return 0
   fi
   # Allow override via env for Homebrew/pkg distribution channels later.
+  # Server enum: brew | curl | dmg | msi | pkg | github-actions.
   local m="${LOWKEY_INSTALL_CHANNEL:-}"
   m="$(printf '%s' "$m" | tr '[:upper:]' '[:lower:]' 2>/dev/null || printf '')"
   case "$m" in
