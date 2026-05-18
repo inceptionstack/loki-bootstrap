@@ -10,6 +10,68 @@
 # shared. Override at install time with: LOKI_SKILLS_REPO_URL=...
 export LOKI_SKILLS_REPO_URL="${LOKI_SKILLS_REPO_URL:-https://github.com/inceptionstack/loki-skills.git}"
 
+# ── ensure_skills_clone ───────────────────────────────────────────────────────
+# Clone loki-skills library to target directory (best-effort, non-fatal).
+# Handles update path, partial directory recovery, missing git gracefully.
+#
+# Usage: ensure_skills_clone <target_dir> [<repo_url>] [<branch>] [<mode>]
+#   target_dir: where to clone (e.g. ~/.openclaw/workspace/skills)
+#   repo_url:   git repo (default: $LOKI_SKILLS_REPO_URL)
+#   branch:     git branch (default: main)
+#   mode:       'warn' (default) or 'fail' — controls error handling
+#
+# Returns: 0 on success, non-zero on failure (caller decides via || true)
+ensure_skills_clone() {
+  local target_dir="${1:?target_dir required}"
+  local repo_url="${2:-${LOKI_SKILLS_REPO_URL}}"
+  local branch="${3:-main}"
+  local mode="${4:-warn}"
+  local rc=0
+
+  # Check git available
+  if ! command -v git &>/dev/null; then
+    local msg="git not found; skills clone skipped"
+    [[ "$mode" == "fail" ]] && { log "$msg (FATAL)"; return 1; } || log "$msg (warn)"
+    return 0
+  fi
+
+  # Existing repo: try update
+  if [[ -d "$target_dir" ]] && [[ -d "$target_dir/.git" ]]; then
+    local origin_url="$(cd "$target_dir" && git config --get remote.origin.url 2>/dev/null)"
+    if [[ "$origin_url" == "$repo_url" ]]; then
+      # Same origin, safe to update
+      if (cd "$target_dir" && git fetch origin "$branch" && git checkout "$branch") &>/dev/null; then
+        log "Skills repo updated at $target_dir"
+        return 0
+      else
+        log "Skills repo update failed; moving aside and re-cloning"
+        mv "$target_dir" "${target_dir}.bak.$RANDOM" || true
+      fi
+    else
+      # Different origin: move aside and re-clone
+      log "Skills origin mismatch; moving aside and re-cloning"
+      mv "$target_dir" "${target_dir}.bak.$RANDOM" || true
+    fi
+  fi
+
+  # Partial dir (no .git): remove and re-clone
+  if [[ -d "$target_dir" ]] && [[ ! -d "$target_dir/.git" ]]; then
+    log "Incomplete skills dir; removing and re-cloning"
+    rm -rf "$target_dir" || true
+  fi
+
+  # Fresh clone (shallow)
+  if ! git clone --depth 1 --branch "$branch" "$repo_url" "$target_dir" &>/dev/null; then
+    local msg="Skills clone failed (repo: $repo_url, branch: $branch)"
+    [[ "$mode" == "fail" ]] && { log "$msg (FATAL)"; return 1; } || log "$msg (warn, continuing)"
+    rc=1
+  else
+    log "Skills cloned to $target_dir"
+  fi
+
+  return $rc
+}
+
 # Colors
 _CLR_GREEN='\033[0;32m'
 _CLR_CYAN='\033[0;36m'
