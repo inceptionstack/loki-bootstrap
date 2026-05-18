@@ -154,22 +154,54 @@ ok "Workspace ready: ${HOME}/.openclaw/workspace"
 # Best-effort: a transient clone failure must not fail the pack install.
 step "Installing loki-skills library"
 SKILLS_DIR="${HOME}/.openclaw/workspace/skills"
+SKILLS_MARKER="${HOME}/.openclaw/workspace/memory/.bootstrapped-skills"
+
+# write_skills_marker -- idempotent; called on every successful path so a
+# pre-seeded skills directory also flips the manual first-boot flow to a no-op.
+write_skills_marker() {
+  mkdir -p "$(dirname "${SKILLS_MARKER}")"
+  printf 'Skills bootstrapped %s (auto via openclaw pack, source=%s)\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "${1:-unknown}" \
+    > "${SKILLS_MARKER}"
+}
+
 if ! command -v git &>/dev/null; then
   warn "git not found -- skipping loki-skills (agent can run BOOTSTRAP-SKILLS.md manually)"
 elif [[ -d "${SKILLS_DIR}/.git" ]]; then
-  if git -C "${SKILLS_DIR}" pull --ff-only --quiet 2>/dev/null; then
-    ok "loki-skills updated ($(ls -1 "${SKILLS_DIR}" | grep -c -v '^\.' || echo 0) entries)"
+  # Existing repo -- verify it points at the expected origin before touching it.
+  # Defends against a local repo repoint from corrupting an unrelated tree.
+  EXISTING_ORIGIN="$(git -C "${SKILLS_DIR}" config --get remote.origin.url 2>/dev/null || echo '')"
+  if [[ "${EXISTING_ORIGIN}" != "${LOKI_SKILLS_REPO_URL}" ]]; then
+    warn "loki-skills origin mismatch (expected ${LOKI_SKILLS_REPO_URL}, found ${EXISTING_ORIGIN:-none}) -- leaving existing tree untouched"
+    write_skills_marker "existing:${EXISTING_ORIGIN:-unknown}"
+  elif git -C "${SKILLS_DIR}" pull --ff-only --quiet 2>/dev/null; then
+    ok "loki-skills updated ($(find "${SKILLS_DIR}" -maxdepth 1 -mindepth 1 ! -name '.*' | wc -l) entries)"
+    write_skills_marker "${LOKI_SKILLS_REPO_URL}"
   else
-    warn "loki-skills update failed -- keeping existing copy"
+    warn "loki-skills fast-forward failed -- keeping existing copy"
+    write_skills_marker "${LOKI_SKILLS_REPO_URL}"
   fi
-else
+elif [[ -e "${SKILLS_DIR}" ]]; then
+  # Path exists but is not a git checkout (partial clone, manual files, etc).
+  # Clear it iff it's empty; otherwise leave alone and warn.
+  if [[ -z "$(ls -A "${SKILLS_DIR}" 2>/dev/null)" ]]; then
+    rmdir "${SKILLS_DIR}" 2>/dev/null || true
+  else
+    warn "${SKILLS_DIR} exists but is not a git repo -- leaving alone, skipping skills install"
+  fi
+fi
+
+# Re-test: if the path is now absent, do a fresh clone. Self-heals from a
+# previous partial-clone failure where the dir exists with no .git inside.
+if command -v git &>/dev/null && [[ ! -e "${SKILLS_DIR}" ]]; then
   if git clone --depth 1 --quiet "${LOKI_SKILLS_REPO_URL}" "${SKILLS_DIR}" 2>/dev/null; then
     ok "loki-skills cloned from ${LOKI_SKILLS_REPO_URL}"
-    mkdir -p "${HOME}/.openclaw/workspace/memory"
-    printf 'Skills bootstrapped %s (auto via openclaw pack)\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      > "${HOME}/.openclaw/workspace/memory/.bootstrapped-skills"
+    write_skills_marker "${LOKI_SKILLS_REPO_URL}"
   else
+    # Clean up any partial directory git may have left behind so the next
+    # pack run is not permanently wedged into the "exists but not a repo" path.
+    rm -rf "${SKILLS_DIR}" 2>/dev/null || true
     warn "loki-skills clone failed -- agent can run BOOTSTRAP-SKILLS.md manually"
   fi
 fi
