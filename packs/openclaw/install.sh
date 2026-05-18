@@ -143,6 +143,125 @@ chmod 700 "${HOME}/.openclaw"
 chmod 700 "${HOME}/.openclaw/workspace"
 ok "Workspace ready: ${HOME}/.openclaw/workspace"
 
+# ── Pre-install loki-skills library ─────────────────────────────────
+# OpenClaw auto-discovers skills under ~/.openclaw/workspace/skills.
+# We clone the shared loki-skills repo into that path and write the same
+# .bootstrapped-skills marker BOOTSTRAP-SKILLS.md uses, so the manual
+# first-boot flow becomes a no-op.
+#
+# Repo URL is shared via LOKI_SKILLS_REPO_URL (see packs/common.sh). Each
+# pack owns its own install step here so pack-specific wiring can diverge.
+# Best-effort: a transient clone failure must not fail the pack install.
+SKILLS_DIR="${HOME}/.openclaw/workspace/skills"
+SKILLS_MARKER="${HOME}/.openclaw/workspace/memory/.bootstrapped-skills"
+
+skills_write_marker() {
+  local source="${1:-unknown}"
+  mkdir -p "$(dirname "${SKILLS_MARKER}")"
+  printf 'Skills bootstrapped %s (auto via openclaw pack, source=%s)\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${source}" \
+    > "${SKILLS_MARKER}"
+}
+
+skills_origin_url() {
+  git -C "${SKILLS_DIR}" config --get remote.origin.url 2>/dev/null || true
+}
+
+skills_origin_matches_expected() {
+  [[ "$(skills_origin_url)" == "${LOKI_SKILLS_REPO_URL}" ]]
+}
+
+skills_count_entries() {
+  find "${SKILLS_DIR}" -maxdepth 1 -mindepth 1 ! -name '.*' 2>/dev/null | wc -l
+}
+
+skills_dir_is_empty() {
+  [[ -z "$(ls -A "${SKILLS_DIR}" 2>/dev/null)" ]]
+}
+
+# Update an existing checkout in place, or refuse if its origin has been
+# repointed (defends against the installer touching an unrelated repo).
+skills_update_existing() {
+  if ! skills_origin_matches_expected; then
+    local origin; origin="$(skills_origin_url)"
+    # Do NOT write the bootstrap marker here. A repointed origin means the
+    # canonical loki-skills tree is not installed; leaving the marker absent
+    # preserves the manual BOOTSTRAP-SKILLS.md recovery path for the agent.
+    warn "loki-skills origin mismatch (expected ${LOKI_SKILLS_REPO_URL}, found ${origin:-none}) -- leaving existing tree untouched, skills marker NOT written"
+    return 0
+  fi
+  if git -C "${SKILLS_DIR}" pull --ff-only --quiet 2>/dev/null; then
+    ok "loki-skills updated ($(skills_count_entries) entries)"
+    skills_write_marker "${LOKI_SKILLS_REPO_URL}"
+    return 0
+  fi
+  # Fast-forward failed. Only mark bootstrapped if the existing tree is
+  # non-empty (still usable for the agent, e.g., transient network blip).
+  # An empty/corrupt repo (interrupted clone, bare 'git init') would leave
+  # no skills behind -- in that case keep the marker absent so the manual
+  # BOOTSTRAP-SKILLS.md recovery path stays available.
+  local entries; entries="$(skills_count_entries)"
+  if (( entries > 0 )); then
+    warn "loki-skills fast-forward failed -- keeping existing tree (${entries} entries)"
+    skills_write_marker "${LOKI_SKILLS_REPO_URL}"
+  else
+    warn "loki-skills fast-forward failed and tree is empty -- skills marker NOT written, agent can recover via BOOTSTRAP-SKILLS.md"
+  fi
+}
+
+# Returns 0 if the path is now ready for a fresh clone (absent or just cleared);
+# returns 1 if it exists with content we will not touch, signalling "skip clone".
+skills_prepare_for_fresh_clone() {
+  [[ ! -e "${SKILLS_DIR}" ]] && return 0
+  if skills_dir_is_empty; then
+    rmdir "${SKILLS_DIR}" 2>/dev/null || true
+    return 0
+  fi
+  warn "${SKILLS_DIR} exists but is not a git repo -- leaving alone, skipping skills install"
+  return 1
+}
+
+skills_fresh_clone() {
+  if git clone --depth 1 --quiet "${LOKI_SKILLS_REPO_URL}" "${SKILLS_DIR}" 2>/dev/null; then
+    ok "loki-skills cloned from ${LOKI_SKILLS_REPO_URL}"
+    skills_write_marker "${LOKI_SKILLS_REPO_URL}"
+    return 0
+  fi
+  # Self-heal: a partial dir from a failed clone would wedge the next run.
+  rm -rf "${SKILLS_DIR}" 2>/dev/null || true
+  warn "loki-skills clone failed -- agent can run BOOTSTRAP-SKILLS.md manually"
+}
+
+skills_install() {
+  if ! command -v git &>/dev/null; then
+    warn "git not found -- skipping loki-skills (agent can run BOOTSTRAP-SKILLS.md manually)"
+    return 0
+  fi
+  if [[ -d "${SKILLS_DIR}/.git" ]]; then
+    skills_update_existing
+    return 0
+  fi
+  if ! skills_prepare_for_fresh_clone; then
+    return 0
+  fi
+  skills_fresh_clone
+}
+
+step "Installing loki-skills library"
+# Wrap in a subshell + ||-guard so ANY runtime failure in skills_install
+# (errexit, pipefail, explicit exit, missing command, signal death, unbound
+# var) cannot kill the pack install. Parse-time syntax errors in this file
+# itself would still fail before we reach this line -- those must be caught
+# by `bash -n` in CI. This is the best-effort contract: skills are
+# nice-to-have, the agent can recover via BOOTSTRAP-SKILLS.md if anything
+# here goes sideways.
+_skills_rc=0
+( skills_install ) || _skills_rc=$?
+if (( _skills_rc != 0 )); then
+  warn "loki-skills install failed (rc=${_skills_rc}) -- continuing pack install (best-effort); agent can recover via BOOTSTRAP-SKILLS.md"
+fi
+unset _skills_rc
+
 # ── Generate token if not provided ────────────────────────────────────────────
 if [[ -z "${GW_TOKEN}" ]]; then
   GW_TOKEN="$(openssl rand -hex 24)"
