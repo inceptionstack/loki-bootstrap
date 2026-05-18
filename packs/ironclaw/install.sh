@@ -364,6 +364,12 @@ systemctl --user enable ironclaw 2>/dev/null || true
 ok "Systemd service installed with EnvironmentFile + --no-onboard"
 
 # ── Done ─────────────────────────────────────────────────────────────────────
+
+# ── Install loki-skills library ───────────────────────────────────────────────
+# Best-effort: pre-install skills (shared or pack-specific).
+PACK_SKILLS_DIR="${HOME}/.ironclaw/skills"
+ensure_skills_clone "${PACK_SKILLS_DIR}" || true
+log "Skills installed to ${PACK_SKILLS_DIR}"
 write_done_marker "ironclaw"
 printf "\n[PACK:ironclaw] INSTALLED — ironclaw CLI ready\n"
 printf "  model: %s via bedrockify:%s\n" "${MODEL}" "${BEDROCKIFY_PORT}"
