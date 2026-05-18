@@ -192,10 +192,21 @@ skills_update_existing() {
   fi
   if git -C "${SKILLS_DIR}" pull --ff-only --quiet 2>/dev/null; then
     ok "loki-skills updated ($(skills_count_entries) entries)"
-  else
-    warn "loki-skills fast-forward failed -- keeping existing copy"
+    skills_write_marker "${LOKI_SKILLS_REPO_URL}"
+    return 0
   fi
-  skills_write_marker "${LOKI_SKILLS_REPO_URL}"
+  # Fast-forward failed. Only mark bootstrapped if the existing tree is
+  # non-empty (still usable for the agent, e.g., transient network blip).
+  # An empty/corrupt repo (interrupted clone, bare 'git init') would leave
+  # no skills behind -- in that case keep the marker absent so the manual
+  # BOOTSTRAP-SKILLS.md recovery path stays available.
+  local entries; entries="$(skills_count_entries)"
+  if (( entries > 0 )); then
+    warn "loki-skills fast-forward failed -- keeping existing tree (${entries} entries)"
+    skills_write_marker "${LOKI_SKILLS_REPO_URL}"
+  else
+    warn "loki-skills fast-forward failed and tree is empty -- skills marker NOT written, agent can recover via BOOTSTRAP-SKILLS.md"
+  fi
 }
 
 # Returns 0 if the path is now ready for a fresh clone (absent or just cleared);
