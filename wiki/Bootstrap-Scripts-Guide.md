@@ -24,9 +24,6 @@ Run these first, in any order. They set up the foundation your agent needs.
 ### BOOTSTRAP-SECURITY.md — Security & Budget Setup
 Enables GuardDuty, Security Hub, Inspector, and Access Analyzer monitoring. Sets up AWS Budgets alerts to catch cost surprises. Creates security-focused cron jobs for ongoing monitoring.
 
-### BOOTSTRAP-SKILLS.md — AWS Skills Library
-Installs the core AWS infrastructure skills that teach Loki how to provision and manage AWS resources following best practices. Covers CDK, CloudFormation, Lambda, API Gateway, DynamoDB, S3, ECS, and more.
-
 ### BOOTSTRAP-MCPORTER.md — MCP Server Tooling
 Sets up MCPorter for managing MCP (Model Context Protocol) servers. Configures the AWS MCP servers for documentation search, API access, and CloudFormation schema lookups.
 
@@ -66,6 +63,9 @@ Adds a GitHub Action that runs Claude Code for automatic code review on PRs and 
 
 ### OPTIMIZE-TOO-LARGE-CONTEXT.md — Context Optimization
 Tips for reducing system prompt size when hitting context limits. Covers workspace file pruning, memory consolidation, and skill management.
+
+### BOOTSTRAP-SKILLS.md — Skills Library (Manual / Recovery)
+The `openclaw` pack pre-installs the loki-skills library automatically during EC2 bootstrap, so this is usually a no-op. Run it manually only as a recovery path — `git` was missing on first boot, the clone failed, the existing skills checkout has a different origin, or you're on a non-openclaw pack that doesn't auto-install yet (hermes, nemoclaw, pi, ironclaw, kiro-cli, codex-cli, roundhouse, claude-code).
 
 ## Telegram Bootstraps
 

@@ -152,7 +152,6 @@ Available essential bootstraps:
 - **BOOTSTRAP-PLAYWRIGHT** — Sets up Playwright browser automation
 - **BOOTSTRAP-SECRETS-AWS** — Configures AWS secrets and credential management
 - **BOOTSTRAP-SECURITY** — Establishes security protocols and guidelines
-- **BOOTSTRAP-SKILLS** — Configures skills and capabilities
 
 ### Step 3: Run the Optional Bootstraps
 
@@ -164,6 +163,7 @@ Available optional bootstraps:
 
 - **BOOTSTRAP-GITHUBACTION-CODE-REVIEW** — Integrates GitHub Actions with automated code review
 - **BOOTSTRAP-PIPELINE-NOTIFICATIONS** — Sets up CI/CD pipeline notifications
+- **BOOTSTRAP-SKILLS** — Manual install / recovery for the loki-skills library (auto-installed by the `openclaw` pack)
 - **BOOTSTRAP-WEB-UI** — Configures the web user interface
 - **OPTIMIZE-TOO-LARGE-CONTEXT** — Optimization strategies for large context windows
 

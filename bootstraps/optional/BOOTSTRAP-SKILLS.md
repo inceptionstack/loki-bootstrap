@@ -1,8 +1,21 @@
-# BOOTSTRAP-SKILLS.md — Skills Library Setup
+# BOOTSTRAP-SKILLS.md — Skills Library Setup (Optional / Recovery)
 
 > **Applies to:** All agents (with agent-specific sections below)
 
-> **Run this once on first boot.** If `memory/.bootstrapped-skills` exists, skip — you've already done this.
+> **You probably don't need to run this.** As of PR #64, the `openclaw`
+> pack pre-installs the loki-skills library automatically during EC2
+> bootstrap and writes `memory/.bootstrapped-skills` for you. This doc
+> is kept as a **manual recovery path** for when:
+>
+> - the auto-install was skipped (e.g. `git` missing, clone failure,
+>   origin mismatch, empty corrupt repo) — see `packs/openclaw/install.sh`
+> - you're running a non-openclaw pack that hasn't wired its own skills
+>   install yet (hermes, nemoclaw, pi, ironclaw, kiro-cli, codex-cli,
+>   roundhouse, claude-code)
+> - you want to re-clone or move to a fork via `LOKI_SKILLS_REPO_URL`
+>
+> **Run this only if `memory/.bootstrapped-skills` is absent.** If it
+> exists, skills are already set up — skip.
 
 ## 1. Install Skills
 
