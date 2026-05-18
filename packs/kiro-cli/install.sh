@@ -363,7 +363,7 @@ fi
 # Best-effort: pre-install skills to kiro workspace.
 PACK_SKILLS_DIR="${HOME}/.kiro/skills"
 ensure_skills_clone "${PACK_SKILLS_DIR}" || true
-log "Skills installed to ${PACK_SKILLS_DIR}"
+log "Skills auto-installed to ${PACK_SKILLS_DIR}"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 write_done_marker "kiro-cli"

@@ -130,7 +130,7 @@ ok "Pi config written: ${HOME}/.pi/agent/models.json"
 # Best-effort: pre-install skills as reference docs for Pi users.
 # Skills are stored per-agent (not auto-discovered), so users must manually
 # create TypeScript extensions to use them. This ensures they're always available.
-PACK_SKILLS_DIR="${HOME}/.pi/agent/skills"
+PACK_SKILLS_DIR="${HOME}/.pi/agent/extensions"
 ensure_skills_clone "${PACK_SKILLS_DIR}" || true
 log "Skills installed to ${PACK_SKILLS_DIR} (reference docs; manual extension creation needed)"
 
