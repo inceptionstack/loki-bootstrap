@@ -143,6 +143,37 @@ chmod 700 "${HOME}/.openclaw"
 chmod 700 "${HOME}/.openclaw/workspace"
 ok "Workspace ready: ${HOME}/.openclaw/workspace"
 
+# ── Pre-install loki-skills library ─────────────────────────────────
+# OpenClaw auto-discovers skills under ~/.openclaw/workspace/skills.
+# We clone (or fast-forward) the shared loki-skills repo into that path and
+# write the same .bootstrapped-skills marker BOOTSTRAP-SKILLS.md uses, so the
+# manual first-boot flow becomes a no-op.
+#
+# Repo URL is shared via LOKI_SKILLS_REPO_URL (see packs/common.sh). Each
+# pack owns its own install step here so pack-specific wiring can diverge.
+# Best-effort: a transient clone failure must not fail the pack install.
+step "Installing loki-skills library"
+SKILLS_DIR="${HOME}/.openclaw/workspace/skills"
+if ! command -v git &>/dev/null; then
+  warn "git not found -- skipping loki-skills (agent can run BOOTSTRAP-SKILLS.md manually)"
+elif [[ -d "${SKILLS_DIR}/.git" ]]; then
+  if git -C "${SKILLS_DIR}" pull --ff-only --quiet 2>/dev/null; then
+    ok "loki-skills updated ($(ls -1 "${SKILLS_DIR}" | grep -c -v '^\.' || echo 0) entries)"
+  else
+    warn "loki-skills update failed -- keeping existing copy"
+  fi
+else
+  if git clone --depth 1 --quiet "${LOKI_SKILLS_REPO_URL}" "${SKILLS_DIR}" 2>/dev/null; then
+    ok "loki-skills cloned from ${LOKI_SKILLS_REPO_URL}"
+    mkdir -p "${HOME}/.openclaw/workspace/memory"
+    printf 'Skills bootstrapped %s (auto via openclaw pack)\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      > "${HOME}/.openclaw/workspace/memory/.bootstrapped-skills"
+  else
+    warn "loki-skills clone failed -- agent can run BOOTSTRAP-SKILLS.md manually"
+  fi
+fi
+
 # ── Generate token if not provided ────────────────────────────────────────────
 if [[ -z "${GW_TOKEN}" ]]; then
   GW_TOKEN="$(openssl rand -hex 24)"

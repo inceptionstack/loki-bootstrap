@@ -3,6 +3,13 @@
 # Source this file; do not execute directly.
 # Usage: source "$(dirname "$0")/../common.sh"
 
+# ── Shared constants ─────────────────────────────────────────────────────────
+# Loki skills library — the single source of truth used by every pack that
+# wants to pre-install agent skills. Each pack owns its own install step (so
+# pack-specific layout / post-clone wiring can differ); only this URL is
+# shared. Override at install time with: LOKI_SKILLS_REPO_URL=...
+export LOKI_SKILLS_REPO_URL="${LOKI_SKILLS_REPO_URL:-https://github.com/inceptionstack/loki-skills.git}"
+
 # Colors
 _CLR_GREEN='\033[0;32m'
 _CLR_CYAN='\033[0;36m'
