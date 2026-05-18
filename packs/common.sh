@@ -26,7 +26,6 @@ ensure_skills_clone() {
   local repo_url="${2:-${LOKI_SKILLS_REPO_URL}}"
   local branch="${3:-main}"
   local mode="${4:-warn}"
-  local rc=0
 
   # Check git available
   if ! command -v git &>/dev/null; then
