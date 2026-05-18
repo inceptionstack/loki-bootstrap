@@ -26,7 +26,6 @@ ensure_skills_clone() {
   local repo_url="${2:-${LOKI_SKILLS_REPO_URL}}"
   local branch="${3:-main}"
   local mode="${4:-warn}"
-  local rc=0
 
   # Check git available
   if ! command -v git &>/dev/null; then
@@ -35,41 +34,62 @@ ensure_skills_clone() {
     return 0
   fi
 
-  # Existing repo: try update
+  # Existing repo: try update if same origin
   if [[ -d "$target_dir" ]] && [[ -d "$target_dir/.git" ]]; then
     local origin_url="$(cd "$target_dir" && git config --get remote.origin.url 2>/dev/null)"
     if [[ "$origin_url" == "$repo_url" ]]; then
-      # Same origin, safe to update
-      if (cd "$target_dir" && git fetch origin "$branch" && git checkout "$branch") &>/dev/null; then
-        log "Skills repo updated at $target_dir"
+      # Same origin, safe to update: reset to remote tip
+      if (cd "$target_dir" && git fetch origin "$branch" 2>&1 && git reset --hard "origin/$branch" 2>&1) &>/dev/null; then
+        log "Skills repo updated at $target_dir (branch: $branch)"
         return 0
       else
-        log "Skills repo update failed; moving aside and re-cloning"
-        mv "$target_dir" "${target_dir}.bak.$RANDOM" || true
+        # Update failed: preserve existing rather than move aside in warn mode
+        if [[ "$mode" == "fail" ]]; then
+          log "Skills repo update failed (FATAL)"
+          return 1
+        else
+          log "Skills repo update failed; keeping existing checkout (warn mode)"
+          return 0
+        fi
       fi
     else
-      # Different origin: move aside and re-clone
-      log "Skills origin mismatch; moving aside and re-cloning"
-      mv "$target_dir" "${target_dir}.bak.$RANDOM" || true
+      # Different origin: only move aside if clone will succeed
+      # Preserve existing in warn mode if replacement fails
+      log "Skills origin mismatch; attempting re-clone..."
     fi
   fi
 
   # Partial dir (no .git): remove and re-clone
-  if [[ -d "$target_dir" ]] && [[ ! -d "$target_dir/.git" ]]; then
-    log "Incomplete skills dir; removing and re-cloning"
-    rm -rf "$target_dir" || true
+  local backup_dir=""
+  if [[ -d "$target_dir" ]]; then
+    if [[ ! -d "$target_dir/.git" ]]; then
+      log "Incomplete skills dir; removing and re-cloning"
+      rm -rf "$target_dir" || true
+    else
+      # Save as backup in case clone fails (warn mode recovery)
+      backup_dir="${target_dir}.bak.$RANDOM"
+      mv "$target_dir" "$backup_dir" || true
+    fi
   fi
 
-  # Fresh clone (shallow)
-  if ! git clone --depth 1 --branch "$branch" "$repo_url" "$target_dir" &>/dev/null; then
-    local msg="Skills clone failed (repo: $repo_url, branch: $branch)"
-    [[ "$mode" == "fail" ]] && { log "$msg (FATAL)"; return 1; } || log "$msg (warn, continuing)"
-    rc=1
-  else
+  # Fresh clone (shallow) — only commit to move if clone succeeds
+  if git clone --depth 1 --branch "$branch" "$repo_url" "$target_dir" &>/dev/null; then
+    # Clone succeeded: remove backup if one exists
+    [[ -n "$backup_dir" ]] && rm -rf "$backup_dir" || true
     log "Skills cloned to $target_dir"
+    return 0
+  else
+    # Clone failed: restore backup if we have one (warn mode)
+    if [[ -n "$backup_dir" ]] && [[ -d "$backup_dir" ]]; then
+      mv "$backup_dir" "$target_dir" || true
+      local msg="Skills clone failed; restored backup at $target_dir"
+      [[ "$mode" == "fail" ]] && { log "$msg (FATAL)"; return 1; } || { log "$msg (warn)"; return 0; }
+    else
+      # No backup to restore
+      local msg="Skills clone failed (repo: $repo_url, branch: $branch)"
+      [[ "$mode" == "fail" ]] && { log "$msg (FATAL)"; return 1; } || { log "$msg (warn, no fallback)"; return 1; }
+    fi
   fi
-
-  return $rc
 }
 
 # Colors

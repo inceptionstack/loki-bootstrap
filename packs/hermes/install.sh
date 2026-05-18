@@ -145,10 +145,13 @@ fi
 # ── Done ──────────────────────────────────────────────────────────────────────
 
 # ── Install loki-skills library ───────────────────────────────────────────────
-# Best-effort: pre-install skills (shared or pack-specific).
+# Best-effort: pre-install skills for auto-discovery.
 PACK_SKILLS_DIR="${HOME}/.hermes/skills"
-ensure_skills_clone "${PACK_SKILLS_DIR}" || true
-log "Skills installed to ${PACK_SKILLS_DIR}"
+if ensure_skills_clone "${PACK_SKILLS_DIR}"; then
+  ok "Skills installed to ${PACK_SKILLS_DIR} (auto-discovered)"
+else
+  warn "Skills clone failed (optional; hermes is still usable without skills)"
+fi
 write_done_marker "hermes"
 printf "\n[PACK:hermes] INSTALLED — hermes CLI ready (model: %s via bedrockify:%s)\n" \
   "${MODEL}" "${BEDROCKIFY_PORT}"

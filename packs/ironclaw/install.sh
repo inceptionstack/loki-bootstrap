@@ -365,9 +365,9 @@ ok "Systemd service installed with EnvironmentFile + --no-onboard"
 
 # ── Done ─────────────────────────────────────────────────────────────────────
 
-# ── IronClaw Skills Configuration (MCP-native, no direct skills auto-discovery) ─
-# IronClaw uses MCP servers (Model Context Protocol) for extensions, not local skills.
-# Skill reference docs: see ~/.openclaw/workspace/skills/ + BOOTSTRAP-MCPORTER.md
+# ── IronClaw MCP Configuration ──────────────────────────────────────────────────────
+# IronClaw uses MCP servers (Model Context Protocol) for extensions.
+# For skills reference docs, see: https://github.com/inceptionstack/loki-skills
 log "IronClaw configured for MCP servers (no local skills pre-install needed)"
 write_done_marker "ironclaw"
 printf "\n[PACK:ironclaw] INSTALLED — ironclaw CLI ready\n"

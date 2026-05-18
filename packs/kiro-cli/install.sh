@@ -360,10 +360,13 @@ if [[ -f "${SHELL_PROFILE}" && -d /etc/profile.d ]]; then
 fi
 
 # ── Install loki-skills library ───────────────────────────────────────────────
-# Best-effort: pre-install skills to kiro workspace.
+# Best-effort: pre-install skills for auto-discovery.
 PACK_SKILLS_DIR="${HOME}/.kiro/skills"
-ensure_skills_clone "${PACK_SKILLS_DIR}" || true
-log "Skills auto-installed to ${PACK_SKILLS_DIR}"
+if ensure_skills_clone "${PACK_SKILLS_DIR}"; then
+  ok "Skills auto-installed to ${PACK_SKILLS_DIR} (auto-discovered)"
+else
+  warn "Skills clone failed (optional; kiro is still usable without skills)"
+fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 write_done_marker "kiro-cli"
