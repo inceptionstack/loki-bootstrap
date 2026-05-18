@@ -293,7 +293,7 @@ NOTICE
 
 # ── Install loki-skills library ───────────────────────────────────────────────
 # Best-effort: pre-install skills (shared or pack-specific).
-PACK_SKILLS_DIR="${HOME}/.local/share/lowkey/skills"
+PACK_SKILLS_DIR="${HOME}/.codex/skills"
 ensure_skills_clone "${PACK_SKILLS_DIR}" || true
 log "Skills installed to ${PACK_SKILLS_DIR}"
 write_done_marker "codex-cli"

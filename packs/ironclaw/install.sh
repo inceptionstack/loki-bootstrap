@@ -365,11 +365,10 @@ ok "Systemd service installed with EnvironmentFile + --no-onboard"
 
 # ── Done ─────────────────────────────────────────────────────────────────────
 
-# ── Install loki-skills library ───────────────────────────────────────────────
-# Best-effort: pre-install skills (shared or pack-specific).
-PACK_SKILLS_DIR="${HOME}/.ironclaw/skills"
-ensure_skills_clone "${PACK_SKILLS_DIR}" || true
-log "Skills installed to ${PACK_SKILLS_DIR}"
+# ── IronClaw Skills Configuration (MCP-native, no direct skills auto-discovery) ─
+# IronClaw uses MCP servers (Model Context Protocol) for extensions, not local skills.
+# Skill reference docs: see ~/.openclaw/workspace/skills/ + BOOTSTRAP-MCPORTER.md
+log "IronClaw configured for MCP servers (no local skills pre-install needed)"
 write_done_marker "ironclaw"
 printf "\n[PACK:ironclaw] INSTALLED — ironclaw CLI ready\n"
 printf "  model: %s via bedrockify:%s\n" "${MODEL}" "${BEDROCKIFY_PORT}"
