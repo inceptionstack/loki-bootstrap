@@ -127,12 +127,15 @@ chmod 600 "${HOME}/.pi/agent/models.json"
 ok "Pi config written: ${HOME}/.pi/agent/models.json"
 
 # ── Install loki-skills library ───────────────────────────────────────────────
-# Best-effort: pre-install skills as reference docs for Pi users.
-# Skills are stored per-agent (not auto-discovered), so users must manually
-# create TypeScript extensions to use them. This ensures they're always available.
+# Best-effort: pre-install skills for auto-discovery.
+# Pi auto-discovers SKILL.md folders in ~/.pi/agent/extensions/.
+# Users can also create manual TypeScript extension adapters if needed.
 PACK_SKILLS_DIR="${HOME}/.pi/agent/extensions"
-ensure_skills_clone "${PACK_SKILLS_DIR}" || true
-log "Skills installed to ${PACK_SKILLS_DIR} (reference docs; manual extension creation needed)"
+if ensure_skills_clone "${PACK_SKILLS_DIR}"; then
+  ok "Skills installed to ${PACK_SKILLS_DIR} (auto-discovered by pi)"
+else
+  warn "Skills clone failed (optional; pi is still usable without skills)"
+fi
 
 # ── Sanity check ─────────────────────────────────────────────────────────────
 step "Sanity check"
