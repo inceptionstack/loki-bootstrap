@@ -184,8 +184,10 @@ skills_dir_is_empty() {
 skills_update_existing() {
   if ! skills_origin_matches_expected; then
     local origin; origin="$(skills_origin_url)"
-    warn "loki-skills origin mismatch (expected ${LOKI_SKILLS_REPO_URL}, found ${origin:-none}) -- leaving existing tree untouched"
-    skills_write_marker "existing:${origin:-unknown}"
+    # Do NOT write the bootstrap marker here. A repointed origin means the
+    # canonical loki-skills tree is not installed; leaving the marker absent
+    # preserves the manual BOOTSTRAP-SKILLS.md recovery path for the agent.
+    warn "loki-skills origin mismatch (expected ${LOKI_SKILLS_REPO_URL}, found ${origin:-none}) -- leaving existing tree untouched, skills marker NOT written"
     return 0
   fi
   if git -C "${SKILLS_DIR}" pull --ff-only --quiet 2>/dev/null; then
