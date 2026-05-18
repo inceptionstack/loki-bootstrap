@@ -237,11 +237,19 @@ skills_install() {
 }
 
 step "Installing loki-skills library"
-# Wrap in a subshell + ||-guard so ANY unexpected failure in skills_install
-# (errexit, pipefail, exit, etc.) cannot kill the pack install. This is the
-# best-effort contract: skills are nice-to-have, the agent can recover via
-# BOOTSTRAP-SKILLS.md if anything here goes sideways.
-( skills_install ) || warn "loki-skills install hit an unexpected error -- continuing pack install (best-effort)"
+# Wrap in a subshell + ||-guard so ANY runtime failure in skills_install
+# (errexit, pipefail, explicit exit, missing command, signal death, unbound
+# var) cannot kill the pack install. Parse-time syntax errors in this file
+# itself would still fail before we reach this line -- those must be caught
+# by `bash -n` in CI. This is the best-effort contract: skills are
+# nice-to-have, the agent can recover via BOOTSTRAP-SKILLS.md if anything
+# here goes sideways.
+_skills_rc=0
+( skills_install ) || _skills_rc=$?
+if (( _skills_rc != 0 )); then
+  warn "loki-skills install failed (rc=${_skills_rc}) -- continuing pack install (best-effort); agent can recover via BOOTSTRAP-SKILLS.md"
+fi
+unset _skills_rc
 
 # ── Generate token if not provided ────────────────────────────────────────────
 if [[ -z "${GW_TOKEN}" ]]; then
