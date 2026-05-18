@@ -155,6 +155,12 @@ CLAUDE_VER="$(claude --version 2>/dev/null || echo unknown)"
 ok "claude --version: ${CLAUDE_VER}"
 
 # ── Done ─────────────────────────────────────────────────────────────────────
+
+# ── Install loki-skills library ───────────────────────────────────────────────
+# Best-effort: pre-install skills (shared or pack-specific).
+PACK_SKILLS_DIR="${HOME}/.local/share/lowkey/skills"
+ensure_skills_clone "${PACK_SKILLS_DIR}" || true
+log "Skills installed to ${PACK_SKILLS_DIR}"
 write_done_marker "claude-code"
 printf "\n[PACK:claude-code] INSTALLED — claude CLI ready (model: %s via Bedrock region: %s)\n" \
   "${MODEL}" "${REGION}"
