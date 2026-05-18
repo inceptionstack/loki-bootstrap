@@ -83,7 +83,6 @@ These set up security baselines, coding guidelines, MCP tools, memory search, an
 | Bootstrap | What It Does |
 |-----------|-------------|
 | `BOOTSTRAP-SECURITY.md` | Security hardening + AWS Budgets alerts |
-| `BOOTSTRAP-SKILLS.md` | Installs AWS infrastructure skills |
 | `BOOTSTRAP-MCPORTER.md` | Sets up MCP server tooling |
 | `BOOTSTRAP-CODING-GUIDELINES.md` | Coding standards and project conventions |
 | `BOOTSTRAP-SECRETS-AWS.md` | AWS Secrets Manager integration |

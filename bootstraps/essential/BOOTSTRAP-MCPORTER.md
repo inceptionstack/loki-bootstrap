@@ -98,7 +98,7 @@ This is your cheat sheet — future-you will thank present-you.
 
 ## Pi-Specific Configuration
 
-**Not applicable.** Pi has no MCP support. MCPorter cannot be used with Pi. For extended capabilities, use Pi's TypeScript extensions system instead — see `BOOTSTRAP-SKILLS.md`.
+**Not applicable.** Pi has no MCP support. MCPorter cannot be used with Pi. For extended capabilities, use Pi's TypeScript extensions system instead — see `../optional/BOOTSTRAP-SKILLS.md`.
 
 ## IronClaw-Specific Configuration
 
