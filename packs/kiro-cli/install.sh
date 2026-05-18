@@ -359,12 +359,6 @@ if [[ -f "${SHELL_PROFILE}" && -d /etc/profile.d ]]; then
     warn "Could not install shell profile (permission denied?)"
 fi
 
-# ── Install loki-skills library ───────────────────────────────────────────────
-# Best-effort: pre-install skills to kiro workspace.
-PACK_SKILLS_DIR="${HOME}/.kiro/skills"
-ensure_skills_clone "${PACK_SKILLS_DIR}" || true
-log "Skills installed to ${PACK_SKILLS_DIR}"
-
 # ── Done ──────────────────────────────────────────────────────────────────────
 write_done_marker "kiro-cli"
 if [[ -n "${PACK_ARG_API_KEY}" ]]; then
