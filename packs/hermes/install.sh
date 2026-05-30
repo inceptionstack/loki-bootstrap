@@ -2,7 +2,7 @@
 # packs/hermes/install.sh — Install Hermes Agent and configure it to use bedrockify
 #
 # Usage:
-#   ./install.sh [--region us-east-1] [--hermes-model anthropic/claude-opus-4.6] [--bedrockify-port 8090]
+#   ./install.sh [--region us-east-1] [--hermes-model global.anthropic.claude-opus-4-6-v1] [--bedrockify-port 8090]
 #
 # Assumes:
 #   - bedrockify is already installed and running (see packs/bedrockify/)
@@ -20,9 +20,10 @@ source "${SCRIPT_DIR}/../common.sh"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 # Defaults from config file (written by bootstrap dispatcher), then CLI overrides
-# Note: reads "hermes_model" key (not "model") — hermes needs OpenAI-style model ID
+# Note: reads "hermes_model" key (not "model") — must be a Bedrock model ID
+# that bedrockify accepts (same default as openclaw).
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
-PACK_ARG_MODEL="$(pack_config_get hermes_model "anthropic/claude-opus-4.6")"
+PACK_ARG_MODEL="$(pack_config_get hermes_model "global.anthropic.claude-opus-4-6-v1")"
 PACK_ARG_BEDROCKIFY_PORT="$(pack_config_get bedrockify_port "8090")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
@@ -34,7 +35,7 @@ Install Hermes Agent and configure it to use bedrockify.
 
 Options:
   --region           AWS region for Bedrock         (default: us-east-1)
-  --hermes-model     Model ID (OpenAI-style)        (default: anthropic/claude-opus-4.6)
+  --hermes-model     Bedrock model ID                (default: global.anthropic.claude-opus-4-6-v1)
   --bedrockify-port  Port where bedrockify listens  (default: 8090)
   --help             Show this help message
 
@@ -43,7 +44,7 @@ Note: --model is ignored (it carries Bedrock model IDs from the dispatcher).
 
 Examples:
   ./install.sh --region us-east-1
-  ./install.sh --hermes-model anthropic/claude-sonnet-4.6 --bedrockify-port 8090
+  ./install.sh --hermes-model global.anthropic.claude-sonnet-4-6 --bedrockify-port 8090
 EOF
 }
 
