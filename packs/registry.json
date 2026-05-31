@@ -54,7 +54,7 @@
       "instance_type": "t4g.medium",
       "root_volume_gb": 40,
       "data_volume_gb": 0,
-      "default_model": "anthropic/claude-opus-4.6",
+      "default_model": "global.anthropic.claude-opus-4-6-v1",
       "ports": {},
       "brain": false,
       "claude_code": false,
